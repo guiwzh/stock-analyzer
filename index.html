@@ -72,31 +72,42 @@
         .result { display: none; }
         .result.active { display: block; }
 
-        /* 信号卡片 */
+        /* 信号卡片 — 中性底色 + 顶部强调条 + 微渐变 */
         .signal-card {
-            text-align: center; padding: 30px; border-radius: 12px;
-            margin-bottom: 20px; position: relative; overflow: hidden;
+            text-align: center; padding: 28px 30px 26px; border-radius: 12px;
+            margin-bottom: 20px; position: relative;
+            background: #141e28; border: 1px solid #1f2d3a; border-top: 4px solid #555;
         }
-        .signal-card::before {
-            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-            opacity: 0.1; z-index: 0;
+        .signal-card.strong-buy {
+            border-top-color: #ff4444;
+            background: linear-gradient(180deg, rgba(255,68,68,0.10), rgba(255,68,68,0) 55%), #141e28;
         }
-        .signal-card.strong-buy { background: #1a2e1a; border: 1px solid #2d5a2d; }
-        .signal-card.strong-buy::before { background: #00ff00; }
-        .signal-card.buy { background: #1a2e1a; border: 1px solid #2d5a2d; }
-        .signal-card.weak-buy { background: #1a2a1a; border: 1px solid #2a4a2a; }
-        .signal-card.neutral { background: #2a2a1a; border: 1px solid #4a4a2a; }
-        .signal-card.sell { background: #2e1a1a; border: 1px solid #5a2d2d; }
-        .signal-card.strong-sell { background: #2e1a1a; border: 1px solid #5a2d2d; }
+        .signal-card.buy {
+            border-top-color: #ff7043;
+            background: linear-gradient(180deg, rgba(255,112,67,0.07), rgba(255,112,67,0) 55%), #141e28;
+        }
+        .signal-card.weak-buy {
+            border-top-color: #ff9800;
+            background: linear-gradient(180deg, rgba(255,152,0,0.06), rgba(255,152,0,0) 55%), #141e28;
+        }
+        .signal-card.neutral { border-top-color: #888; }
+        .signal-card.sell {
+            border-top-color: #26c281;
+            background: linear-gradient(180deg, rgba(38,194,129,0.06), rgba(38,194,129,0) 55%), #141e28;
+        }
+        .signal-card.strong-sell {
+            border-top-color: #00cc66;
+            background: linear-gradient(180deg, rgba(0,204,102,0.10), rgba(0,204,102,0) 55%), #141e28;
+        }
 
-        .signal-card .stock-info { margin-bottom: 15px; position: relative; z-index: 1; }
+        .signal-card .stock-info { margin-bottom: 14px; }
         .signal-card .stock-name { font-size: 22px; font-weight: bold; color: #fff; }
         .signal-card .stock-code { font-size: 13px; color: #888; margin-left: 8px; }
-        .signal-card .stock-price { font-size: 28px; font-weight: bold; margin: 8px 0; }
+        .signal-card .stock-price { font-size: 30px; font-weight: bold; margin: 6px 0 2px; letter-spacing: 0.5px; }
         .signal-card .stock-change { font-size: 14px; }
-        .signal-card .signal-text { font-size: 24px; font-weight: bold; margin: 15px 0 5px; position: relative; z-index: 1; }
-        .signal-card .signal-score { font-size: 13px; color: #aaa; position: relative; z-index: 1; }
-        .signal-card .signal-advice { font-size: 14px; color: #ccc; margin-top: 10px; position: relative; z-index: 1; }
+        .signal-card .signal-text { font-size: 24px; font-weight: bold; margin: 16px 0 4px; letter-spacing: 1px; }
+        .signal-card .signal-score { font-size: 13px; color: #8a9aa8; }
+        .signal-card .signal-advice { font-size: 14px; color: #c4d0db; margin-top: 10px; }
 
         .up { color: #ff4444; }
         .down { color: #00cc66; }
@@ -218,9 +229,6 @@
             <button onclick="quickAnalyze('sh600111')">北方稀土</button>
             <button onclick="quickAnalyze('sh601318')">中国平安</button>
             <button onclick="quickAnalyze('sh601066')">中信建投</button>
-            <button onclick="quickAnalyze('2330')">台积电</button>
-            <button onclick="quickAnalyze('2317')">鸿海</button>
-            <button onclick="quickAnalyze('2454')">联发科</button>
         </div>
         <div class="shortcuts" id="customShortcuts"></div>
 
@@ -354,8 +362,8 @@
                         </div>
                         <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
                             <div style="font-size:11px;color:#888">盈亏比</div>
-                            <div style="font-size:18px;font-weight:bold;color:#fff">${long.avgWin || 0} / ${long.avgLoss || 0}</div>
-                            <div style="font-size:11px;color:#888">均盈 / 均亏</div>
+                            <div style="font-size:18px;font-weight:bold;color:#fff">${long.avgWin || 0} : ${Math.abs(long.avgLoss || 0)}</div>
+                            <div style="font-size:11px;color:#888">均盈 : 均亏</div>
                         </div>
                     </div>` : `<div style="padding:12px;text-align:center;color:#888;font-size:13px;background:#141e28;border-radius:6px;margin-bottom:12px">回测周期内无做多入场信号</div>`}
                     <button onclick="saveToShortcuts('${bt.code}','${safeName}','${long.winRate}','${bt.grade}')" style="padding:8px 16px;border:1px solid ${gradeColor};border-radius:6px;background:transparent;color:${gradeColor};cursor:pointer;font-size:13px">+ 加入快捷列表</button>
@@ -363,8 +371,18 @@
                 </div>`;
             }
 
-            // 信号卡片
-            html += `<div class="signal-card ${summary.signalClass}">
+            // 信号卡片 - 按 totalScore 派生 class（后端不返回 signalClass）
+            const ts = summary.totalScore;
+            const signalClass = summary.signalClass
+                || (ts >= 10 ? 'strong-buy'
+                    : ts >= 5 ? 'buy'
+                    : ts >= 1 ? 'weak-buy'
+                    : ts >= -4 ? 'neutral'
+                    : ts >= -9 ? 'sell'
+                    : 'strong-sell');
+            const signalIsBullish = ts >= 1;
+            const signalIsBearish = ts < -4;
+            html += `<div class="signal-card ${signalClass}">
                 <div class="stock-info">
                     <span class="stock-name">${rt.name}</span>
                     <span class="stock-code">${rt.code}</span>
@@ -374,13 +392,13 @@
                 <div class="stock-change ${direction}">
                     ${rt.change > 0 ? '+' : ''}${rt.change.toFixed(2)} (${rt.changePct > 0 ? '+' : ''}${rt.changePct.toFixed(2)}%)
                 </div>
-                <div class="signal-text ${direction === 'up' ? 'up' : direction === 'down' ? 'down' : ''}">${summary.signal}</div>
-                <div class="signal-score">综合评分: ${summary.totalScore} 分 | ${summary.positionAdvice || ''}</div>
+                <div class="signal-text ${signalIsBullish ? 'up' : signalIsBearish ? 'down' : 'flat'}">${summary.signal}</div>
+                <div class="signal-score">综合评分: ${summary.totalScore} 分${rr && rr.positionAdvice ? ' | ' + rr.positionAdvice : ''}</div>
                 <div class="signal-advice">${summary.advice}</div>
             </div>`;
 
             // 操作建议大卡片（最显眼）
-            const posAdvice = summary.positionAdvice || '';
+            const posAdvice = (rr && rr.positionAdvice) || '';
             const holdAdvice = summary.totalScore >= 10 ? '建议持仓5-10天，趋势跟踪' : summary.totalScore >= 5 ? '建议持仓3-5天，短线波段' : summary.totalScore >= 1 ? '建议持仓1-3天，快进快出' : '不建议开仓';
             const signalColor = summary.totalScore >= 5 ? '#4caf50' : summary.totalScore >= 1 ? '#ff9800' : summary.totalScore >= -4 ? '#888' : '#f44336';
 
@@ -492,7 +510,16 @@
                         ${scoreText}
                     </div>
                     <div class="section-body">
-                        ${d.signals.map(s => `<div class="signal-item">${s}</div>`).join('')}
+                        ${d.signals.map(s => {
+                            const m = (typeof s === 'string' ? s : '').match(/^\[([^\]]+)\]\s*(.*)$/);
+                            if (!m) return `<div class="signal-item">${s}</div>`;
+                            const tag = m[1], rest = m[2];
+                            const bullish = /多|涨|强|底/.test(tag);
+                            const bearish = /空|跌|弱|顶/.test(tag);
+                            const bg = bullish ? '#1a3a1a' : bearish ? '#3a1a1a' : '#1a2a3a';
+                            const fg = bullish ? '#8bc34a' : bearish ? '#ff8a80' : '#7fa9d4';
+                            return `<div class="signal-item"><span style="display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;margin-right:6px;background:${bg};color:${fg}">${tag}</span>${rest}</div>`;
+                        }).join('')}
                     </div>
                 </div>`;
             }
