@@ -1,0 +1,53 @@
+{
+  "name": "@kamuira/stock-analyzer",
+  "version": "1.2.1",
+  "preferGlobal": true,
+  "description": "A股/台股综合技术分析工具 - 支持实时分析、回测验证、买卖建议",
+  "main": "server.js",
+  "bin": {
+    "stock-analyze": "bin/analyze.js",
+    "stock-server": "bin/server.js",
+    "stock-backtest": "bin/backtest.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node dev.js",
+    "analyze": "node analyze.js",
+    "backtest": "node backtest.js"
+  },
+  "keywords": [
+    "stock",
+    "technical-analysis",
+    "A-share",
+    "Taiwan-stock",
+    "MACD",
+    "RSI",
+    "KDJ",
+    "ADX",
+    "backtest"
+  ],
+  "author": "guiwzh",
+  "license": "MIT",
+  "homepage": "https://github.com/guiwzh/stock-analyzer#readme",
+  "bugs": {
+    "url": "https://github.com/guiwzh/stock-analyzer/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guiwzh/stock-analyzer.git"
+  },
+  "files": [
+    "bin/",
+    "server.js",
+    "analyze.js",
+    "backtest.js",
+    "dev.js",
+    "indicators.js",
+    "scoring.js",
+    "index.html",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

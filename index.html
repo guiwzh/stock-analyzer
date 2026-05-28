@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A股综合分析工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: #0f1923;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+
+        /* 头部 */
+        .header { text-align: center; padding: 30px 0 20px; }
+        .header h1 { font-size: 26px; color: #00d4ff; margin-bottom: 8px; }
+        .header p { color: #666; font-size: 13px; }
+
+        /* 搜索框 */
+        .search-box {
+            display: flex; gap: 10px; justify-content: center;
+            margin: 20px 0 30px; flex-wrap: wrap;
+        }
+        .search-box input {
+            padding: 12px 16px; border: 1px solid #2a3a4a; border-radius: 8px;
+            background: #1a2a3a; color: #fff; font-size: 15px; width: 280px;
+            outline: none; transition: border-color 0.2s;
+        }
+        .search-box input:focus { border-color: #00d4ff; }
+        .search-box button {
+            padding: 12px 24px; border: none; border-radius: 8px;
+            background: #0066ff; color: #fff; font-size: 15px;
+            cursor: pointer; transition: background 0.2s;
+        }
+        .search-box button:hover { background: #0055dd; }
+        .search-box button:disabled { background: #333; cursor: not-allowed; }
+
+        /* 快捷按钮 */
+        .shortcuts {
+            display: flex; gap: 8px; justify-content: center;
+            margin-bottom: 20px; flex-wrap: wrap;
+        }
+        .shortcuts button {
+            padding: 6px 14px; border: 1px solid #2a3a4a; border-radius: 20px;
+            background: transparent; color: #aaa; font-size: 12px;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .shortcuts button:hover { border-color: #00d4ff; color: #00d4ff; }
+
+        /* 加载状态 */
+        .loading { text-align: center; padding: 40px; color: #666; display: none; }
+        .loading.active { display: block; }
+        .spinner {
+            width: 30px; height: 30px; border: 3px solid #333;
+            border-top-color: #00d4ff; border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin: 0 auto 10px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 错误 */
+        .error {
+            text-align: center; padding: 20px; color: #ff6b6b;
+            background: #2a1a1a; border-radius: 8px; margin: 20px 0; display: none;
+        }
+        .error.active { display: block; }
+
+        /* 结果区域 */
+        .result { display: none; }
+        .result.active { display: block; }
+
+        /* 信号卡片 */
+        .signal-card {
+            text-align: center; padding: 30px; border-radius: 12px;
+            margin-bottom: 20px; position: relative; overflow: hidden;
+        }
+        .signal-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            opacity: 0.1; z-index: 0;
+        }
+        .signal-card.strong-buy { background: #1a2e1a; border: 1px solid #2d5a2d; }
+        .signal-card.strong-buy::before { background: #00ff00; }
+        .signal-card.buy { background: #1a2e1a; border: 1px solid #2d5a2d; }
+        .signal-card.weak-buy { background: #1a2a1a; border: 1px solid #2a4a2a; }
+        .signal-card.neutral { background: #2a2a1a; border: 1px solid #4a4a2a; }
+        .signal-card.sell { background: #2e1a1a; border: 1px solid #5a2d2d; }
+        .signal-card.strong-sell { background: #2e1a1a; border: 1px solid #5a2d2d; }
+
+        .signal-card .stock-info { margin-bottom: 15px; position: relative; z-index: 1; }
+        .signal-card .stock-name { font-size: 22px; font-weight: bold; color: #fff; }
+        .signal-card .stock-code { font-size: 13px; color: #888; margin-left: 8px; }
+        .signal-card .stock-price { font-size: 28px; font-weight: bold; margin: 8px 0; }
+        .signal-card .stock-change { font-size: 14px; }
+        .signal-card .signal-text { font-size: 24px; font-weight: bold; margin: 15px 0 5px; position: relative; z-index: 1; }
+        .signal-card .signal-score { font-size: 13px; color: #aaa; position: relative; z-index: 1; }
+        .signal-card .signal-advice { font-size: 14px; color: #ccc; margin-top: 10px; position: relative; z-index: 1; }
+
+        .up { color: #ff4444; }
+        .down { color: #00cc66; }
+        .flat { color: #999; }
+
+        /* 评分条 */
+        .score-bar-container { margin: 20px 0; }
+        .score-bar {
+            height: 8px; background: #1a2a3a; border-radius: 4px;
+            position: relative; overflow: hidden;
+        }
+        .score-bar-fill {
+            height: 100%; border-radius: 4px; transition: width 0.5s ease;
+        }
+        .score-labels {
+            display: flex; justify-content: space-between;
+            font-size: 11px; color: #666; margin-top: 4px;
+        }
+
+        /* 分析模块 */
+        .section { margin-bottom: 16px; }
+        .section-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px; background: #1a2a3a; border-radius: 8px 8px 0 0;
+            cursor: pointer; user-select: none;
+        }
+        .section-header:hover { background: #1e3040; }
+        .section-title { font-size: 14px; font-weight: bold; }
+        .section-score {
+            font-size: 12px; padding: 2px 8px; border-radius: 10px;
+        }
+        .section-score.positive { background: #1a3a1a; color: #4caf50; }
+        .section-score.negative { background: #3a1a1a; color: #f44336; }
+        .section-score.zero { background: #2a2a2a; color: #999; }
+        .section-body {
+            padding: 12px 16px; background: #141e28; border-radius: 0 0 8px 8px;
+            border: 1px solid #1a2a3a; border-top: none;
+        }
+        .signal-item {
+            padding: 6px 0; font-size: 13px; color: #bbb;
+            border-bottom: 1px solid #1a2530;
+        }
+        .signal-item:last-child { border-bottom: none; }
+        .signal-item::before { content: '· '; color: #555; }
+
+        /* 买卖条件 */
+        .conditions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; }
+        @media (max-width: 600px) { .conditions { grid-template-columns: 1fr; } }
+        .condition-card {
+            padding: 16px; border-radius: 10px;
+        }
+        .condition-card.buy-card { background: #1a2e1a; border: 1px solid #2d4a2d; }
+        .condition-card.sell-card { background: #2e1a1a; border: 1px solid #4a2d2d; }
+        .condition-card h3 { font-size: 14px; margin-bottom: 10px; }
+        .condition-card.buy-card h3 { color: #4caf50; }
+        .condition-card.sell-card h3 { color: #f44336; }
+        .condition-item {
+            padding: 8px 0; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .condition-item:last-child { border-bottom: none; }
+        .condition-priority {
+            display: inline-block; padding: 1px 6px; border-radius: 3px;
+            font-size: 11px; margin-right: 6px;
+        }
+        .buy-card .condition-priority { background: #2d4a2d; color: #8bc34a; }
+        .sell-card .condition-priority { background: #4a2d2d; color: #ff8a80; }
+
+        /* 支撑压力 */
+        .levels {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px; margin: 20px 0;
+        }
+        .level-item {
+            padding: 10px 14px; background: #1a2a3a; border-radius: 8px;
+            font-size: 13px;
+        }
+        .level-label { color: #888; font-size: 11px; }
+        .level-value { font-size: 16px; font-weight: bold; margin-top: 4px; color: #fff; }
+
+        /* 免责声明 */
+        .disclaimer {
+            text-align: center; padding: 20px; margin-top: 30px;
+            font-size: 11px; color: #555; border-top: 1px solid #1a2a3a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>A股综合分析工具</h1>
+            <p>输入股票代码，获取技术面综合分析和买卖建议（支持A股/台股）</p>
+        </div>
+
+        <div class="search-box">
+            <input type="text" id="codeInput" placeholder="A股: 名称/代码/拼音 | 台股: 4位代码如2330" autocomplete="off">
+            <button id="analyzeBtn" onclick="doAnalyze()">分析</button>
+        </div>
+
+        <div class="shortcuts">
+            <button onclick="quickAnalyze('sz002049')">紫光国微</button>
+            <button onclick="quickAnalyze('sh603893')">瑞芯微</button>
+            <button onclick="quickAnalyze('sz300750')">宁德时代</button>
+            <button onclick="quickAnalyze('sz300274')">阳光电源</button>
+            <button onclick="quickAnalyze('sh603698')">航天工程</button>
+            <button onclick="quickAnalyze('sh601138')">工业富联</button>
+            <button onclick="quickAnalyze('sh600011')">华能国际</button>
+            <button onclick="quickAnalyze('sh601600')">中国铝业</button>
+            <button onclick="quickAnalyze('sz002138')">顺络电子</button>
+            <button onclick="quickAnalyze('sh603986')">兆易创新</button>
+            <button onclick="quickAnalyze('sz002716')">湖南白银</button>
+            <button onclick="quickAnalyze('sh603256')">宏和科技</button>
+            <button onclick="quickAnalyze('sz001309')">德明利</button>
+            <button onclick="quickAnalyze('sh601899')">紫金矿业</button>
+            <button onclick="quickAnalyze('sz000426')">兴业银锡</button>
+            <button onclick="quickAnalyze('sz002428')">云南锗业</button>
+            <button onclick="quickAnalyze('sh600259')">中稀有色</button>
+            <button onclick="quickAnalyze('sh600362')">江西铜业</button>
+            <button onclick="quickAnalyze('sh600206')">有研新材</button>
+            <button onclick="quickAnalyze('sh600111')">北方稀土</button>
+            <button onclick="quickAnalyze('sh601318')">中国平安</button>
+            <button onclick="quickAnalyze('sh601066')">中信建投</button>
+            <button onclick="quickAnalyze('2330')">台积电</button>
+            <button onclick="quickAnalyze('2317')">鸿海</button>
+            <button onclick="quickAnalyze('2454')">联发科</button>
+        </div>
+        <div class="shortcuts" id="customShortcuts"></div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p id="loadingText">正在获取数据并分析中...</p>
+        </div>
+
+        <div class="error" id="error"></div>
+
+        <div class="result" id="result"></div>
+    </div>
+
+    <script>
+        const input = document.getElementById('codeInput');
+        const btn = document.getElementById('analyzeBtn');
+        const loading = document.getElementById('loading');
+        const loadingText = document.getElementById('loadingText');
+        const errorDiv = document.getElementById('error');
+        const resultDiv = document.getElementById('result');
+
+        // 从 localStorage 加载自定义快捷按钮
+        function loadCustomShortcuts() {
+            let saved = [];
+            try { saved = JSON.parse(localStorage.getItem('customStocks') || '[]'); } catch(e) { saved = []; }
+            const container = document.getElementById('customShortcuts');
+            container.innerHTML = '';
+            for (const s of saved) {
+                const b = document.createElement('button');
+                b.textContent = s.name;
+                b.onclick = () => quickAnalyze(s.code);
+                b.title = `${s.code} | 5日胜率${s.winRate}% | 评级:${s.grade}`;
+                if (s.grade === '优秀') b.style.borderColor = '#4caf50';
+                else if (s.grade === '良好') b.style.borderColor = '#2196f3';
+                else if (s.grade === '较差') b.style.borderColor = '#f44336';
+                container.appendChild(b);
+            }
+        }
+        loadCustomShortcuts();
+
+        function saveToShortcuts(code, name, winRate, grade) {
+            let saved = [];
+            try { saved = JSON.parse(localStorage.getItem('customStocks') || '[]'); } catch(e) { saved = []; }
+            if (saved.find(s => s.code === code)) return;
+            saved.push({ code, name: name.replace(/['"<>]/g, ''), winRate, grade });
+            localStorage.setItem('customStocks', JSON.stringify(saved));
+            loadCustomShortcuts();
+        }
+
+        input.addEventListener('keypress', e => { if (e.key === 'Enter') doAnalyze(); });
+
+        function quickAnalyze(code) {
+            input.value = code;
+            doAnalyze(false); // 所有快捷按钮都显示回测
+        }
+
+        async function doAnalyze(skipBacktest = false) {
+            let code = input.value.trim();
+            if (!code) return;
+
+            btn.disabled = true;
+            loading.classList.add('active');
+            errorDiv.classList.remove('active');
+            resultDiv.classList.remove('active');
+
+            try {
+                // Step 1: 先做回测（除非是快捷按钮跳过）
+                let backtestData = null;
+                if (!skipBacktest) {
+                    loadingText.textContent = '正在回测历史数据...';
+                    const btRes = await fetch(`/api/backtest?code=${encodeURIComponent(code)}`);
+                    backtestData = await btRes.json();
+                    if (backtestData.error) {
+                        showError(backtestData.error);
+                        return;
+                    }
+                }
+
+                // Step 2: 实时分析
+                loadingText.textContent = '正在分析实时数据...';
+                const res = await fetch(`/api/analyze?code=${encodeURIComponent(code)}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+
+                renderResult(data, backtestData);
+            } catch (e) {
+                showError('网络请求失败: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                loading.classList.remove('active');
+                loadingText.textContent = '正在获取数据并分析中...';
+            }
+        }
+
+        function showError(msg) {
+            errorDiv.textContent = msg;
+            errorDiv.classList.add('active');
+        }
+
+        function renderResult(data, backtestData) {
+            const { realtime: rt, indicators: ind, supportResistance: sr, buyConditions, sellConditions, summary, riskReward: rr, marketState, marketEnv } = data;
+            const direction = rt.change > 0 ? 'up' : rt.change < 0 ? 'down' : 'flat';
+
+            let html = '';
+
+            // 回测结果卡片
+            if (backtestData && !backtestData.error) {
+                const bt = backtestData;
+                const s3 = bt.summary['3'] || {winRate:0,avgReturn:0};
+                const s5 = bt.summary['5'] || {winRate:0,avgReturn:0};
+                const s10 = bt.summary['10'] || {winRate:0,avgReturn:0};
+                const gradeColor = bt.grade === '优秀' ? '#4caf50' : bt.grade === '良好' ? '#2196f3' : bt.grade === '一般' ? '#ff9800' : '#f44336';
+                const safeName = (bt.name||'').replace(/['"<>&]/g, '');
+                html += `<div style="background:#1a2530;border:1px solid ${gradeColor};margin-bottom:20px;padding:20px;border-radius:10px">
+                    <h3 style="color:${gradeColor};margin-bottom:12px;font-size:15px">回测验证: ${safeName} (${bt.code}) — 评级: ${bt.grade}</h3>
+                    <div style="font-size:12px;color:#888;margin-bottom:10px">数据: ${bt.dataRange} | 买入信号${bt.buySignals}次 | 卖出信号${bt.sellSignals}次</div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+                        <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
+                            <div style="font-size:11px;color:#888">3日胜率</div>
+                            <div style="font-size:18px;font-weight:bold;color:${s3.winRate>=55?'#4caf50':'#ff9800'}">${s3.winRate}%</div>
+                            <div style="font-size:11px;color:#888">均收益 ${s3.avgReturn}%</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
+                            <div style="font-size:11px;color:#888">5日胜率</div>
+                            <div style="font-size:18px;font-weight:bold;color:${s5.winRate>=55?'#4caf50':'#ff9800'}">${s5.winRate}%</div>
+                            <div style="font-size:11px;color:#888">均收益 ${s5.avgReturn}%</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
+                            <div style="font-size:11px;color:#888">10日胜率</div>
+                            <div style="font-size:18px;font-weight:bold;color:${s10.winRate>=55?'#4caf50':'#ff9800'}">${s10.winRate}%</div>
+                            <div style="font-size:11px;color:#888">均收益 ${s10.avgReturn}%</div>
+                        </div>
+                    </div>
+                    <button onclick="saveToShortcuts('${bt.code}','${safeName}','${s5.winRate}','${bt.grade}')" style="padding:8px 16px;border:1px solid ${gradeColor};border-radius:6px;background:transparent;color:${gradeColor};cursor:pointer;font-size:13px">+ 加入快捷列表</button>
+                    <span style="font-size:11px;color:#666;margin-left:10px">加入后可在顶部快速访问</span>
+                </div>`;
+            }
+
+            // 信号卡片
+            html += `<div class="signal-card ${summary.signalClass}">
+                <div class="stock-info">
+                    <span class="stock-name">${rt.name}</span>
+                    <span class="stock-code">${rt.code}</span>
+                    <span style="font-size:12px;color:#888;margin-left:10px">${marketState} | ${summary.marketEnv || ''}</span>
+                </div>
+                <div class="stock-price ${direction}">${rt.price.toFixed(2)}</div>
+                <div class="stock-change ${direction}">
+                    ${rt.change > 0 ? '+' : ''}${rt.change.toFixed(2)} (${rt.changePct > 0 ? '+' : ''}${rt.changePct.toFixed(2)}%)
+                </div>
+                <div class="signal-text ${direction === 'up' ? 'up' : direction === 'down' ? 'down' : ''}">${summary.signal}</div>
+                <div class="signal-score">综合评分: ${summary.totalScore} 分 | ${summary.positionAdvice || ''}</div>
+                <div class="signal-advice">${summary.advice}</div>
+            </div>`;
+
+            // 操作建议大卡片（最显眼）
+            const posAdvice = summary.positionAdvice || '';
+            const holdAdvice = summary.totalScore >= 10 ? '建议持仓5-10天，趋势跟踪' : summary.totalScore >= 5 ? '建议持仓3-5天，短线波段' : summary.totalScore >= 1 ? '建议持仓1-3天，快进快出' : '不建议开仓';
+            const signalColor = summary.totalScore >= 5 ? '#4caf50' : summary.totalScore >= 1 ? '#ff9800' : summary.totalScore >= -4 ? '#888' : '#f44336';
+
+            html += `<div style="background:linear-gradient(135deg,#1a2e3a,#1a2530);border:2px solid ${signalColor};border-radius:14px;padding:24px;margin-bottom:20px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+                    <div style="font-size:20px;font-weight:bold;color:${signalColor}">${summary.signal}</div>
+                    <div style="font-size:13px;color:#aaa">${marketState} | ${summary.marketEnv || ''}</div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
+                    <div style="background:#141e28;border-radius:10px;padding:14px;text-align:center">
+                        <div style="font-size:11px;color:#888;margin-bottom:4px">仓位建议</div>
+                        <div style="font-size:16px;font-weight:bold;color:#fff">${posAdvice || '观望不动'}</div>
+                    </div>
+                    <div style="background:#141e28;border-radius:10px;padding:14px;text-align:center">
+                        <div style="font-size:11px;color:#888;margin-bottom:4px">持仓周期</div>
+                        <div style="font-size:16px;font-weight:bold;color:#fff">${holdAdvice}</div>
+                    </div>
+                    <div style="background:#141e28;border-radius:10px;padding:14px;text-align:center">
+                        <div style="font-size:11px;color:#888;margin-bottom:4px">风险收益比</div>
+                        <div style="font-size:16px;font-weight:bold;color:${rr && rr.riskRewardRatio >= 2 ? '#4caf50' : rr && rr.riskRewardRatio >= 1 ? '#ff9800' : '#f44336'}">1:${rr ? rr.riskRewardRatio : '-'}</div>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                    <div style="background:#122a1a;border:1px solid #2d5a2d;border-radius:10px;padding:16px">
+                        <div style="font-size:14px;font-weight:bold;color:#4caf50;margin-bottom:10px">买入操作</div>
+                        ${buyConditions.map(c => `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#ccc"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:6px;background:#2d4a2d;color:#8bc34a">${c.priority}</span>${c.condition}</div>`).join('')}
+                    </div>
+                    <div style="background:#2a1a1a;border:1px solid #5a2d2d;border-radius:10px;padding:16px">
+                        <div style="font-size:14px;font-weight:bold;color:#f44336;margin-bottom:10px">卖出/止损</div>
+                        ${sellConditions.map(c => `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#ccc"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:6px;background:#4a2d2d;color:#ff8a80">${c.priority}</span>${c.condition}</div>`).join('')}
+                    </div>
+                </div>
+                ${rr ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
+                    <div style="text-align:center;padding:10px;background:#141e28;border-radius:8px;border-left:3px solid #f44336">
+                        <div style="font-size:11px;color:#f44336">止损位</div>
+                        <div style="font-size:18px;font-weight:bold;color:#fff">${rr.stopLoss}</div>
+                        <div style="font-size:11px;color:#888">亏损 ${rr.riskPct||''}%</div>
+                    </div>
+                    <div style="text-align:center;padding:10px;background:#141e28;border-radius:8px;border-left:3px solid #ff9800">
+                        <div style="font-size:11px;color:#ff9800">止盈1</div>
+                        <div style="font-size:18px;font-weight:bold;color:#fff">${rr.takeProfit1}</div>
+                        <div style="font-size:11px;color:#888">收益 ${rr.reward1Pct||''}%</div>
+                    </div>
+                    <div style="text-align:center;padding:10px;background:#141e28;border-radius:8px;border-left:3px solid #4caf50">
+                        <div style="font-size:11px;color:#4caf50">止盈2</div>
+                        <div style="font-size:18px;font-weight:bold;color:#fff">${rr.takeProfit2}</div>
+                        <div style="font-size:11px;color:#888">收益 ${rr.reward2Pct||''}%</div>
+                    </div>
+                </div>` : ''}
+            </div>`;
+
+            // 评分条
+            const barColor = summary.totalScore >= 5 ? '#4caf50' : summary.totalScore >= 0 ? '#ff9800' : '#f44336';
+            html += `<div class="score-bar-container">
+                <div class="score-bar">
+                    <div class="score-bar-fill" style="width:${summary.normalizedScore}%; background:${barColor}"></div>
+                </div>
+                <div class="score-labels"><span>强烈卖出</span><span>观望</span><span>强烈买入</span></div>
+            </div>`;
+
+            // 大盘环境
+            if (marketEnv && marketEnv.signals) {
+                html += `<div style="background:#1a2530;border:1px solid #2a3a4a;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#aaa">
+                    <span style="color:#888">大盘环境:</span> ${marketEnv.signals.join(' | ')}
+                </div>`;
+            }
+
+            // 支撑压力位
+            html += `<div class="levels">
+                ${sr.map(s => `<div class="level-item"><div class="level-label">${s.label || s.description || ''}</div><div class="level-value">${s.value || ''}</div>${s.reliability ? `<div style="font-size:11px;color:#888;margin-top:2px">触及${s.touchCount}次 反弹${s.bounceCount}次 可靠性:${s.reliability}</div>` : ''}</div>`).join('')}
+            </div>`;
+
+            // 各指标详情
+            const sections = [
+                { key: 'ma', title: '均线系统' },
+                { key: 'macd', title: 'MACD' },
+                { key: 'rsi', title: 'RSI' },
+                { key: 'kdj', title: 'KDJ' },
+                { key: 'boll', title: '布林带' },
+                { key: 'volume', title: '量价关系' },
+                { key: 'trend', title: '趋势分析' },
+                { key: 'adx', title: 'ADX趋势强度' },
+                { key: 'atr', title: 'ATR波动率', noScore: true },
+                { key: 'divergence', title: '背离检测' },
+                { key: 'volumeDivergence', title: '量价背离' },
+                { key: 'patterns', title: '形态识别' },
+                { key: 'momentum', title: '动量分析' },
+                { key: 'gaps', title: '缺口分析' },
+                { key: 'fibonacci', title: '斐波那契', noScore: true },
+            ];
+
+            for (const sec of sections) {
+                const d = ind[sec.key];
+                if (!d) continue;
+                const score = d.score || 0;
+                const scoreClass = score > 0 ? 'positive' : score < 0 ? 'negative' : 'zero';
+                const scoreText = sec.noScore ? '' : `<span class="section-score ${scoreClass}">${score > 0 ? '+' : ''}${score}分</span>`;
+                html += `<div class="section">
+                    <div class="section-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                        <span class="section-title">${sec.title}</span>
+                        ${scoreText}
+                    </div>
+                    <div class="section-body">
+                        ${d.signals.map(s => `<div class="signal-item">${s}</div>`).join('')}
+                    </div>
+                </div>`;
+            }
+
+            // 免责声明
+            html += `<div class="disclaimer">
+                免责声明：以上分析仅基于技术面指标，不构成投资建议。投资有风险，入市需谨慎。<br>
+                数据来源：新浪财经(实时) / 腾讯财经(历史K线) | 分析时间: ${rt.time}
+            </div>`;
+
+            resultDiv.innerHTML = html;
+            resultDiv.classList.add('active');
+        }
+    </script>
+</body>
+</html>
