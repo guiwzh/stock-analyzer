@@ -333,32 +333,32 @@
             // 回测结果卡片
             if (backtestData && !backtestData.error) {
                 const bt = backtestData;
-                const s3 = bt.summary['3'] || {winRate:0,avgReturn:0};
-                const s5 = bt.summary['5'] || {winRate:0,avgReturn:0};
-                const s10 = bt.summary['10'] || {winRate:0,avgReturn:0};
+                const long = bt.long || {total:0,winRate:0,avgReturn:0,totalReturn:0,avgWin:0,avgLoss:0,avgHoldDays:0};
                 const gradeColor = bt.grade === '优秀' ? '#4caf50' : bt.grade === '良好' ? '#2196f3' : bt.grade === '一般' ? '#ff9800' : '#f44336';
+                const winRateColor = long.winRate >= 55 ? '#4caf50' : long.winRate >= 50 ? '#ff9800' : '#f44336';
+                const avgReturnColor = long.avgReturn > 1.5 ? '#4caf50' : long.avgReturn > 0 ? '#ff9800' : '#f44336';
                 const safeName = (bt.name||'').replace(/['"<>&]/g, '');
                 html += `<div style="background:#1a2530;border:1px solid ${gradeColor};margin-bottom:20px;padding:20px;border-radius:10px">
                     <h3 style="color:${gradeColor};margin-bottom:12px;font-size:15px">回测验证: ${safeName} (${bt.code}) — 评级: ${bt.grade}</h3>
-                    <div style="font-size:12px;color:#888;margin-bottom:10px">数据: ${bt.dataRange} | 买入信号${bt.buySignals}次 | 卖出信号${bt.sellSignals}次</div>
-                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+                    <div style="font-size:12px;color:#888;margin-bottom:10px">数据: ${bt.dataRange || '-'} | 引擎: ${bt.engine || '-'} | 做多交易 ${long.total} 笔 | 平均持仓 ${long.avgHoldDays || 0} 天</div>
+                    ${long.total > 0 ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
                         <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
-                            <div style="font-size:11px;color:#888">3日胜率</div>
-                            <div style="font-size:18px;font-weight:bold;color:${s3.winRate>=55?'#4caf50':'#ff9800'}">${s3.winRate}%</div>
-                            <div style="font-size:11px;color:#888">均收益 ${s3.avgReturn}%</div>
+                            <div style="font-size:11px;color:#888">做多胜率</div>
+                            <div style="font-size:18px;font-weight:bold;color:${winRateColor}">${long.winRate}%</div>
+                            <div style="font-size:11px;color:#888">${long.wins||0}胜 / ${long.losses||0}负</div>
                         </div>
                         <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
-                            <div style="font-size:11px;color:#888">5日胜率</div>
-                            <div style="font-size:18px;font-weight:bold;color:${s5.winRate>=55?'#4caf50':'#ff9800'}">${s5.winRate}%</div>
-                            <div style="font-size:11px;color:#888">均收益 ${s5.avgReturn}%</div>
+                            <div style="font-size:11px;color:#888">单笔均收益</div>
+                            <div style="font-size:18px;font-weight:bold;color:${avgReturnColor}">${long.avgReturn}%</div>
+                            <div style="font-size:11px;color:#888">累计 ${long.totalReturn}%</div>
                         </div>
                         <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
-                            <div style="font-size:11px;color:#888">10日胜率</div>
-                            <div style="font-size:18px;font-weight:bold;color:${s10.winRate>=55?'#4caf50':'#ff9800'}">${s10.winRate}%</div>
-                            <div style="font-size:11px;color:#888">均收益 ${s10.avgReturn}%</div>
+                            <div style="font-size:11px;color:#888">盈亏比</div>
+                            <div style="font-size:18px;font-weight:bold;color:#fff">${long.avgWin || 0} / ${long.avgLoss || 0}</div>
+                            <div style="font-size:11px;color:#888">均盈 / 均亏</div>
                         </div>
-                    </div>
-                    <button onclick="saveToShortcuts('${bt.code}','${safeName}','${s5.winRate}','${bt.grade}')" style="padding:8px 16px;border:1px solid ${gradeColor};border-radius:6px;background:transparent;color:${gradeColor};cursor:pointer;font-size:13px">+ 加入快捷列表</button>
+                    </div>` : `<div style="padding:12px;text-align:center;color:#888;font-size:13px;background:#141e28;border-radius:6px;margin-bottom:12px">回测周期内无做多入场信号</div>`}
+                    <button onclick="saveToShortcuts('${bt.code}','${safeName}','${long.winRate}','${bt.grade}')" style="padding:8px 16px;border:1px solid ${gradeColor};border-radius:6px;background:transparent;color:${gradeColor};cursor:pointer;font-size:13px">+ 加入快捷列表</button>
                     <span style="font-size:11px;color:#666;margin-left:10px">加入后可在顶部快速访问</span>
                 </div>`;
             }
@@ -406,11 +406,11 @@
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                     <div style="background:#122a1a;border:1px solid #2d5a2d;border-radius:10px;padding:16px">
                         <div style="font-size:14px;font-weight:bold;color:#4caf50;margin-bottom:10px">买入操作</div>
-                        ${buyConditions.map(c => `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#ccc"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:6px;background:#2d4a2d;color:#8bc34a">${c.priority}</span>${c.condition}</div>`).join('')}
+                        ${buyConditions.map(c => { const m = (typeof c === 'string' ? c : '').match(/^\[([^\]]+)\]\s*(.*)$/); const p = m ? m[1] : ''; const t = m ? m[2] : (c || ''); return `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#ccc">${p ? `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:6px;background:#2d4a2d;color:#8bc34a">${p}</span>` : ''}${t}</div>`; }).join('')}
                     </div>
                     <div style="background:#2a1a1a;border:1px solid #5a2d2d;border-radius:10px;padding:16px">
                         <div style="font-size:14px;font-weight:bold;color:#f44336;margin-bottom:10px">卖出/止损</div>
-                        ${sellConditions.map(c => `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#ccc"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:6px;background:#4a2d2d;color:#ff8a80">${c.priority}</span>${c.condition}</div>`).join('')}
+                        ${sellConditions.map(c => { const m = (typeof c === 'string' ? c : '').match(/^\[([^\]]+)\]\s*(.*)$/); const p = m ? m[1] : ''; const t = m ? m[2] : (c || ''); return `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#ccc">${p ? `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;margin-right:6px;background:#4a2d2d;color:#ff8a80">${p}</span>` : ''}${t}</div>`; }).join('')}
                     </div>
                 </div>
                 ${rr ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
@@ -450,7 +450,15 @@
 
             // 支撑压力位
             html += `<div class="levels">
-                ${sr.map(s => `<div class="level-item"><div class="level-label">${s.label || s.description || ''}</div><div class="level-value">${s.value || ''}</div>${s.reliability ? `<div style="font-size:11px;color:#888;margin-top:2px">触及${s.touchCount}次 反弹${s.bounceCount}次 可靠性:${s.reliability}</div>` : ''}</div>`).join('')}
+                ${(sr || []).map(s => {
+                    if (typeof s === 'string') {
+                        const idx = s.lastIndexOf(': ');
+                        const label = idx > -1 ? s.slice(0, idx) : s;
+                        const value = idx > -1 ? s.slice(idx + 2) : '';
+                        return `<div class="level-item"><div class="level-label">${label}</div><div class="level-value">${value}</div></div>`;
+                    }
+                    return `<div class="level-item"><div class="level-label">${s.label || s.description || ''}</div><div class="level-value">${s.value || ''}</div>${s.reliability ? `<div style="font-size:11px;color:#888;margin-top:2px">触及${s.touchCount}次 反弹${s.bounceCount}次 可靠性:${s.reliability}</div>` : ''}</div>`;
+                }).join('')}
             </div>`;
 
             // 各指标详情
