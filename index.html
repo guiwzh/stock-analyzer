@@ -397,6 +397,15 @@
                 <div class="signal-advice">${summary.advice}</div>
             </div>`;
 
+            // 评分条（紧贴信号卡片下方，可视化综合评分）
+            const barColor = summary.totalScore >= 5 ? '#4caf50' : summary.totalScore >= 0 ? '#ff9800' : '#f44336';
+            html += `<div class="score-bar-container">
+                <div class="score-bar">
+                    <div class="score-bar-fill" style="width:${summary.normalizedScore}%; background:${barColor}"></div>
+                </div>
+                <div class="score-labels"><span>强烈卖出</span><span>观望</span><span>强烈买入</span></div>
+            </div>`;
+
             // 操作建议大卡片（最显眼）
             const posAdvice = (rr && rr.positionAdvice) || '';
             const holdAdvice = summary.totalScore >= 10 ? '建议持仓5-10天，趋势跟踪' : summary.totalScore >= 5 ? '建议持仓3-5天，短线波段' : summary.totalScore >= 1 ? '建议持仓1-3天，快进快出' : '不建议开仓';
@@ -448,15 +457,6 @@
                         <div style="font-size:11px;color:#888">收益 ${rr.reward2Pct||''}%</div>
                     </div>
                 </div>` : ''}
-            </div>`;
-
-            // 评分条
-            const barColor = summary.totalScore >= 5 ? '#4caf50' : summary.totalScore >= 0 ? '#ff9800' : '#f44336';
-            html += `<div class="score-bar-container">
-                <div class="score-bar">
-                    <div class="score-bar-fill" style="width:${summary.normalizedScore}%; background:${barColor}"></div>
-                </div>
-                <div class="score-labels"><span>强烈卖出</span><span>观望</span><span>强烈买入</span></div>
             </div>`;
 
             // 大盘环境
