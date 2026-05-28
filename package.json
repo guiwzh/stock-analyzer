@@ -1,6 +1,6 @@
 {
   "name": "@kamuira/stock-analyzer",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "preferGlobal": true,
   "description": "A股/台股综合技术分析工具 - 支持实时分析、回测验证、买卖建议",
   "main": "server.js",
