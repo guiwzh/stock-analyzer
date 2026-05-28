@@ -237,6 +237,10 @@ stock-backtest all                            # 回测全部关注列表
 
 ## 更新日志
 
+### v1.2.2
+- `package.json` 加 `repository` / `homepage` / `bugs` 字段
+- 源码托管在 GitHub:https://github.com/guiwzh/stock-analyzer
+
 ### v1.2.1
 - 加 `--trailing` / `--trailing-atr` / `--no-tp1` 三个回测参数
 - Chandelier Exit 实现(跟踪止损 = peak − N × ATR)
