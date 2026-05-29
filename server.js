@@ -252,8 +252,12 @@ function startServer(port) {
   });
 }
 
-if (require.main === module) {
+function main() {
   startServer(PORT);
 }
 
-module.exports = { server, startServer, searchStock, resolveStockCode };
+if (require.main === module) {
+  main();
+}
+
+module.exports = { server, startServer, searchStock, resolveStockCode, main };

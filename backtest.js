@@ -377,4 +377,4 @@ if (require.main === module) {
   main().catch(e => console.error('回测出错:', e.message));
 }
 
-module.exports = { backtest, formatBacktestReport, resolveCode, getMarketEnvAtDate };
+module.exports = { backtest, formatBacktestReport, resolveCode, getMarketEnvAtDate, main };

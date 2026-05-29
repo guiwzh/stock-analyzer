@@ -354,5 +354,5 @@ if (require.main === module) {
 
 module.exports = {
   fetchRealtime, fetchHistory, fetchTWRealtime, fetchTWHistory,
-  getMarketEnvironment, resolveCode, formatReport, WATCH_LIST,
+  getMarketEnvironment, resolveCode, formatReport, WATCH_LIST, main,
 };
