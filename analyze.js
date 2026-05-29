@@ -12,6 +12,22 @@ const https = require('https');
 const { SMA } = require('./indicators');
 const { computeScore } = require('./scoring');
 
+// 外部行情接口的单次请求超时(毫秒)。上游(新浪/腾讯/Yahoo)任一卡住时,
+// 不加超时会让 Promise 永久挂起,前端一直转圈。
+const REQUEST_TIMEOUT = 8000;
+
+/**
+ * 给一个 http(s) 请求挂上超时和错误处理。
+ * @param {import('http').ClientRequest} req  http(s).get 返回的请求对象
+ * @param {(err: Error) => void} reject       Promise 的 reject
+ * @returns {import('http').ClientRequest}     原 req,便于链式
+ */
+function withTimeout(req, reject) {
+  req.setTimeout(REQUEST_TIMEOUT, () => req.destroy(new Error('请求超时')));
+  req.on('error', reject);
+  return req;
+}
+
 const WATCH_LIST = {
   'sz002049': '紫光国微',
   'sh603893': '瑞芯微',
@@ -50,7 +66,7 @@ function fetchRealtime(codes) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
     };
-    http.get(options, (res) => {
+    withTimeout(http.get(options, (res) => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
@@ -81,23 +97,23 @@ function fetchRealtime(codes) {
         }
         resolve(results);
       });
-    }).on('error', reject);
+    }), reject);
   });
 }
 
 function fetchHistory(code, days = 120) {
   return new Promise((resolve, reject) => {
     const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${code},day,,,${days},qfq`;
-    https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+    withTimeout(https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302) {
         const client = res.headers.location.startsWith('https') ? https : http;
-        client.get(res.headers.location, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res2) => {
+        withTimeout(client.get(res.headers.location, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res2) => {
           collect(res2, code, resolve, reject);
-        }).on('error', reject);
+        }), reject);
         return;
       }
       collect(res, code, resolve, reject);
-    }).on('error', reject);
+    }), reject);
   });
 }
 
@@ -128,7 +144,7 @@ function fetchTWRealtime(code) {
     const num = code.replace(/^tw/i, '');
     const exCh = `tse_${num}.tw|otc_${num}.tw`;
     const url = `/stock/api/getStockInfo.jsp?ex_ch=${exCh}&_=${Date.now()}`;
-    https.get({ hostname: 'mis.twse.com.tw', path: url, headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+    withTimeout(https.get({ hostname: 'mis.twse.com.tw', path: url, headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
@@ -153,7 +169,7 @@ function fetchTWRealtime(code) {
           resolve(results);
         } catch (e) { reject(e); }
       });
-    }).on('error', reject);
+    }), reject);
   });
 }
 
@@ -164,15 +180,15 @@ function fetchTWHistory(code, days = 120) {
     const period2 = Math.floor(Date.now() / 1000);
     const period1 = period2 - Math.floor(days * 24 * 60 * 60 * 1.5);
     const url = `/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
-    https.get({ hostname: 'query1.finance.yahoo.com', path: url, headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+    withTimeout(https.get({ hostname: 'query1.finance.yahoo.com', path: url, headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302) {
-        https.get(res.headers.location, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res2) => {
+        withTimeout(https.get(res.headers.location, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res2) => {
           collectTWHist(res2, resolve, reject);
-        }).on('error', reject);
+        }), reject);
         return;
       }
       collectTWHist(res, resolve, reject);
-    }).on('error', reject);
+    }), reject);
   });
 }
 

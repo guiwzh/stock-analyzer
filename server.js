@@ -20,6 +20,16 @@ const { computeScore } = require('./scoring');
 const { backtest: runBacktest } = require('./backtest');
 
 const PORT = 3000;
+const HOST = '127.0.0.1';
+
+// 搜索接口的单次请求超时(毫秒),避免上游卡住时请求永久挂起
+const REQUEST_TIMEOUT = 8000;
+
+function withTimeout(req, reject) {
+  req.setTimeout(REQUEST_TIMEOUT, () => req.destroy(new Error('请求超时')));
+  req.on('error', reject);
+  return req;
+}
 
 // ==================== 股票搜索(中文/拼音) ====================
 
@@ -27,16 +37,16 @@ function searchStock(keyword) {
   return new Promise((resolve, reject) => {
     const encoded = encodeURIComponent(keyword);
     const url = `https://smartbox.gtimg.cn/s3/?q=${encoded}&t=all`;
-    https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+    withTimeout(https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302) {
         const client = res.headers.location.startsWith('https') ? https : http;
-        client.get(res.headers.location, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res2) => {
+        withTimeout(client.get(res.headers.location, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res2) => {
           collectSearch(res2, resolve, reject);
-        }).on('error', reject);
+        }), reject);
         return;
       }
       collectSearch(res, resolve, reject);
-    }).on('error', reject);
+    }), reject);
   });
 }
 
@@ -196,9 +206,9 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: `未找到股票 ${code} 的实时数据` }));
         return;
       }
-      if (klines.length < 30) {
+      if (klines.length < 60) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: `${code} 历史数据不足,无法进行有效分析` }));
+        res.end(JSON.stringify({ error: `${code} 历史数据不足60天(仅${klines.length}天),无法进行有效分析` }));
         return;
       }
 
@@ -235,12 +245,12 @@ function openBrowser(url) {
 }
 
 function startServer(port) {
-  server.listen(port, () => {
+  server.listen(port, HOST, () => {
     console.log(`\n${'='.repeat(50)}`);
     console.log(`  A股/台股综合分析工具`);
-    console.log(`  打开浏览器访问: http://127.0.0.1:${port}`);
+    console.log(`  打开浏览器访问: http://${HOST}:${port}`);
     console.log(`${'='.repeat(50)}\n`);
-    openBrowser(`http://127.0.0.1:${port}`);
+    openBrowser(`http://${HOST}:${port}`);
   });
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
