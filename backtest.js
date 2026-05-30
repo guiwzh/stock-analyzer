@@ -70,10 +70,32 @@ function backtest(klines, options = {}) {
     trailing = false,     // 默认关闭(高波动股开了反而拖累累计收益)
     trailingATR = 2.5,
     useTP1 = true,
+    // ===== 交易成本(A股零售默认值,均为单边比例) =====
+    commission = 0.0003,  // 佣金 万3(双边各收)
+    stampDuty = 0.0005,   // 印花税 0.05%(仅卖出收)
+    slippage = 0.001,     // 滑点 0.1%(买卖各一次,模拟非理想成交)
   } = options;
   const n = klines.length;
   const trades = [];
   let position = null;
+
+  // 买入腿成本 = 佣金 + 滑点;卖出腿成本 = 佣金 + 印花税 + 滑点
+  const buyCost = commission + slippage;
+  const sellCost = commission + stampDuty + slippage;
+
+  /**
+   * 给定一笔交易的入场/出场价,返回毛收益和扣费后净收益(均为百分比)
+   * 做多:买入摊高成本、卖出折损;做空:入场为卖、出场为买,成本对称施加。
+   */
+  function computeReturns(type, entryPrice, exitPrice) {
+    const gross = type === 'long'
+      ? (exitPrice - entryPrice) / entryPrice * 100
+      : (entryPrice - exitPrice) / entryPrice * 100;
+    const net = type === 'long'
+      ? ((exitPrice * (1 - sellCost)) / (entryPrice * (1 + buyCost)) - 1) * 100
+      : ((1 - sellCost) - (exitPrice / entryPrice) * (1 + buyCost)) * 100;
+    return { gross: +gross.toFixed(2), net: +net.toFixed(2) };
+  }
 
   for (let i = startIdx; i < n; i++) {
     const today = klines[i];
@@ -163,16 +185,15 @@ function backtest(klines, options = {}) {
     }
 
     if (exitReason) {
-      const returnPct = position.type === 'long'
-        ? (exitPrice - position.entryPrice) / position.entryPrice * 100
-        : (position.entryPrice - exitPrice) / position.entryPrice * 100;
+      const ret = computeReturns(position.type, position.entryPrice, exitPrice);
       trades.push({
         type: position.type,
         entryIdx: position.entryIdx, entryDate: position.entryDate, entryPrice: position.entryPrice,
         entryScore: position.entryScore,
         exitIdx: i, exitDate: today.date, exitPrice: +exitPrice.toFixed(2),
         exitReason,
-        returnPct: +returnPct.toFixed(2),
+        returnPct: ret.gross,
+        netReturnPct: ret.net,
         holdDays: i - position.entryIdx,
         stopLoss: position.stopLoss, takeProfit1: position.takeProfit1,
       });
@@ -184,22 +205,26 @@ function backtest(klines, options = {}) {
   if (position) {
     const last = n - 1;
     const exitPrice = klines[last].close;
-    const returnPct = position.type === 'long'
-      ? (exitPrice - position.entryPrice) / position.entryPrice * 100
-      : (position.entryPrice - exitPrice) / position.entryPrice * 100;
+    const ret = computeReturns(position.type, position.entryPrice, exitPrice);
     trades.push({
       type: position.type,
       entryIdx: position.entryIdx, entryDate: position.entryDate, entryPrice: position.entryPrice,
       entryScore: position.entryScore,
       exitIdx: last, exitDate: klines[last].date, exitPrice: +exitPrice.toFixed(2),
       exitReason: 'endOfData',
-      returnPct: +returnPct.toFixed(2),
+      returnPct: ret.gross,
+      netReturnPct: ret.net,
       holdDays: last - position.entryIdx,
       stopLoss: position.stopLoss, takeProfit1: position.takeProfit1,
     });
   }
 
-  return summarize(trades, klines);
+  const result = summarize(trades, klines);
+  result.costs = {
+    commission, stampDuty, slippage,
+    roundTripPct: +((2 * commission + stampDuty + 2 * slippage) * 100).toFixed(3), // 一买一卖的总成本估算
+  };
+  return result;
 }
 
 // ==================== 汇总统计 ====================
@@ -208,29 +233,50 @@ function summarize(trades, klines) {
   const longs = trades.filter(t => t.type === 'long');
   const shorts = trades.filter(t => t.type === 'short');
 
+  // 所有统计均基于扣费后的净收益 netReturnPct
   function stats(group) {
     if (group.length === 0) return null;
-    const wins = group.filter(t => t.returnPct > 0);
-    const losses = group.filter(t => t.returnPct <= 0);
-    const returns = group.map(t => t.returnPct);
+    const wins = group.filter(t => t.netReturnPct > 0);
+    const losses = group.filter(t => t.netReturnPct <= 0);
+    const returns = group.map(t => t.netReturnPct);
+    const grossReturns = group.map(t => t.returnPct);
     const holdDaysArr = group.map(t => t.holdDays);
     const sum = returns.reduce((a, b) => a + b, 0);
     const reasonCount = {};
     for (const t of group) reasonCount[t.exitReason] = (reasonCount[t.exitReason] || 0) + 1;
+
+    // 复利净值曲线 → 复利累计收益 + 最大回撤(按该组交易的时间先后顺序)
+    let equity = 1, peak = 1, maxDD = 0;
+    for (const t of group) {
+      equity *= (1 + t.netReturnPct / 100);
+      if (equity > peak) peak = equity;
+      const dd = (peak - equity) / peak;
+      if (dd > maxDD) maxDD = dd;
+    }
+
+    // 盈利因子:净盈利总和 / 净亏损总和(绝对值)。无亏损时封顶 999 避免 JSON 里的 Infinity
+    const winSum = wins.reduce((a, t) => a + t.netReturnPct, 0);
+    const lossSumAbs = Math.abs(losses.reduce((a, t) => a + t.netReturnPct, 0));
+    const profitFactor = lossSumAbs > 0 ? +(winSum / lossSumAbs).toFixed(2) : (winSum > 0 ? 999 : 0);
+
     return {
       total: group.length,
       wins: wins.length,
       losses: losses.length,
       winRate: +(wins.length / group.length * 100).toFixed(1),
       avgReturn: +(sum / group.length).toFixed(2),
-      totalReturn: +sum.toFixed(2),
+      totalReturn: +sum.toFixed(2),                       // 净收益简单相加(等权)
+      compoundReturn: +((equity - 1) * 100).toFixed(2),   // 净收益复利(满仓滚动)
+      maxDrawdown: +(maxDD * 100).toFixed(2),             // 复利净值的最大回撤
+      profitFactor,
+      grossAvgReturn: +(grossReturns.reduce((a, b) => a + b, 0) / group.length).toFixed(2), // 未扣费均收益,参考用
       maxWin: +Math.max(...returns).toFixed(2),
       maxLoss: +Math.min(...returns).toFixed(2),
       avgHoldDays: +(holdDaysArr.reduce((a, b) => a + b, 0) / group.length).toFixed(1),
       exitReasons: reasonCount,
-      // 期望值 / 凯利公式所需的盈亏比
-      avgWin: wins.length > 0 ? +(wins.reduce((a, t) => a + t.returnPct, 0) / wins.length).toFixed(2) : 0,
-      avgLoss: losses.length > 0 ? +(losses.reduce((a, t) => a + t.returnPct, 0) / losses.length).toFixed(2) : 0,
+      // 期望值 / 凯利公式所需的盈亏比(净)
+      avgWin: wins.length > 0 ? +(winSum / wins.length).toFixed(2) : 0,
+      avgLoss: losses.length > 0 ? +(losses.reduce((a, t) => a + t.netReturnPct, 0) / losses.length).toFixed(2) : 0,
     };
   }
 
@@ -265,9 +311,10 @@ function formatBacktestReport(code, klines, btResult) {
     if (!s) return;
     lines.push('');
     lines.push('─'.repeat(64));
-    lines.push(`【${title}】`);
+    lines.push(`【${title}】(以下均为扣费后净收益)`);
     lines.push(`  交易笔数: ${s.total}   胜: ${s.wins}   负: ${s.losses}   胜率: ${s.winRate}%`);
-    lines.push(`  平均收益: ${s.avgReturn}%   累计收益: ${s.totalReturn}%`);
+    lines.push(`  平均收益: ${s.avgReturn}%(毛 ${s.grossAvgReturn}%)   等权累计: ${s.totalReturn}%   复利累计: ${s.compoundReturn}%`);
+    lines.push(`  最大回撤: ${s.maxDrawdown}%   盈利因子: ${s.profitFactor}`);
     lines.push(`  平均盈利: ${s.avgWin}%   平均亏损: ${s.avgLoss}%   盈亏比: ${s.avgLoss < 0 ? Math.abs(s.avgWin / s.avgLoss).toFixed(2) : '∞'}`);
     lines.push(`  最大盈利: ${s.maxWin}%   最大亏损: ${s.maxLoss}%   平均持有: ${s.avgHoldDays} 天`);
     const reasonLabel = { stopLoss: '止损', trailingStop: '跟踪止损', takeProfit: '止盈', reverseSignal: '反向信号', timeout: '超时', endOfData: '数据末尾' };
@@ -286,8 +333,9 @@ function formatBacktestReport(code, klines, btResult) {
   const reasonLabel = { stopLoss: '止损', trailingStop: '跟踪止损', takeProfit: '止盈', reverseSignal: '反向', timeout: '超时', endOfData: '末尾' };
   for (const t of trades.slice(-10)) {
     const sign = t.type === 'long' ? '▲多' : '▼空';
-    const r = t.returnPct >= 0 ? `+${t.returnPct}%` : `${t.returnPct}%`;
-    lines.push(`  ${t.entryDate} ${sign} @${t.entryPrice} → ${t.exitDate} @${t.exitPrice} | ${r} | ${t.holdDays}天 | ${reasonLabel[t.exitReason] || t.exitReason}`);
+    const net = t.netReturnPct;
+    const r = net >= 0 ? `+${net}%` : `${net}%`;
+    lines.push(`  ${t.entryDate} ${sign} @${t.entryPrice} → ${t.exitDate} @${t.exitPrice} | 净${r} | ${t.holdDays}天 | ${reasonLabel[t.exitReason] || t.exitReason}`);
   }
 
   // 综合评级
@@ -302,7 +350,11 @@ function formatBacktestReport(code, klines, btResult) {
     lines.push(`  做多评级: 胜率 ${long.winRate}% / 均收益 ${long.avgReturn}% / ${long.total}笔 → ${grade}`);
   }
   lines.push(`  注: 用与实盘 analyze 一致的评分(scoring.js),并按 stopLoss/takeProfit 退出`);
-  lines.push(`  局限: 未计手续费和滑点(按用户要求)`);
+  if (btResult.costs) {
+    const c = btResult.costs;
+    lines.push(`  成本: 佣金${(c.commission*100).toFixed(3)}% 印花税${(c.stampDuty*100).toFixed(3)}%(卖) 滑点${(c.slippage*100).toFixed(3)}% → 单次往返约 ${c.roundTripPct}%`);
+  }
+  lines.push(`  局限: 未模拟涨跌停无法成交、未考虑资金分散与最小手续费`);
   lines.push('═'.repeat(64));
   return lines.join('\n');
 }
@@ -326,11 +378,12 @@ async function fetchAny(code, days) {
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const result = { code: 'all', trailing: false, trailingATR: 2.5, useTP1: true };
+  const result = { code: 'all', trailing: false, trailingATR: 2.5, useTP1: true, gross: false };
   for (const a of args) {
     if (a === '--trailing') result.trailing = true;
     else if (a.startsWith('--trailing-atr=')) result.trailingATR = parseFloat(a.split('=')[1]);
     else if (a === '--no-tp1') result.useTP1 = false;
+    else if (a === '--gross') result.gross = true; // 不计任何交易成本,用于对比
     else if (!a.startsWith('--')) result.code = a;
   }
   return result;
@@ -343,7 +396,8 @@ async function main() {
   const modeDesc = [];
   if (args.trailing) modeDesc.push(`跟踪止损=${args.trailingATR}×ATR`);
   if (!args.useTP1) modeDesc.push('无TP1');
-  if (modeDesc.length === 0) modeDesc.push('默认: TP1止盈,无跟踪');
+  modeDesc.push(args.gross ? '不计成本(毛收益)' : '已扣手续费+滑点');
+  if (!args.trailing && args.useTP1) modeDesc.unshift('默认: TP1止盈,无跟踪');
   console.log(`\n正在拉取数据并回测... [${modeDesc.join(', ')}]\n`);
 
   let indexKlines = null;
@@ -364,6 +418,7 @@ async function main() {
       const btResult = backtest(klines, {
         startIdx: 60, maxHoldDays: 30, indexKlines,
         trailing: args.trailing, trailingATR: args.trailingATR, useTP1: args.useTP1,
+        ...(args.gross ? { commission: 0, stampDuty: 0, slippage: 0 } : {}),
       });
       console.log(formatBacktestReport(code, klines, btResult));
       console.log('');

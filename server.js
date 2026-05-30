@@ -246,6 +246,7 @@ const server = http.createServer(async (req, res) => {
         dataRange: btResult.dataRange,
         long: btResult.long,
         short: btResult.short,
+        costs: btResult.costs,
         trades: btResult.trades.slice(-20), // 最近20笔
         grade,
       }));

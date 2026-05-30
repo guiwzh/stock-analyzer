@@ -440,29 +440,50 @@
             // 回测结果卡片
             if (backtestData && !backtestData.error) {
                 const bt = backtestData;
-                const long = bt.long || {total:0,winRate:0,avgReturn:0,totalReturn:0,avgWin:0,avgLoss:0,avgHoldDays:0};
+                const long = bt.long || {total:0,winRate:0,avgReturn:0,totalReturn:0,compoundReturn:0,maxDrawdown:0,profitFactor:0,avgWin:0,avgLoss:0,avgHoldDays:0};
                 const gradeColor = bt.grade === '优秀' ? '#4caf50' : bt.grade === '良好' ? '#2196f3' : bt.grade === '一般' ? '#ff9800' : '#f44336';
                 const winRateColor = long.winRate >= 55 ? '#4caf50' : long.winRate >= 50 ? '#ff9800' : '#f44336';
                 const avgReturnColor = long.avgReturn > 1.5 ? '#4caf50' : long.avgReturn > 0 ? '#ff9800' : '#f44336';
+                const ddColor = long.maxDrawdown <= 10 ? '#4caf50' : long.maxDrawdown <= 25 ? '#ff9800' : '#f44336';
+                const pfColor = long.profitFactor >= 1.5 ? '#4caf50' : long.profitFactor >= 1 ? '#ff9800' : '#f44336';
+                const compoundColor = long.compoundReturn > 0 ? '#4caf50' : '#f44336';
                 const safeName = (bt.name||'').replace(/['"<>&]/g, '');
+                const costNote = bt.costs ? `已扣费(单次往返约${bt.costs.roundTripPct}%)` : '已扣费';
                 html += `<div style="background:#1a2530;border:1px solid ${gradeColor};margin-bottom:20px;padding:20px;border-radius:10px">
                     <h3 style="color:${gradeColor};margin-bottom:12px;font-size:15px">回测验证: ${safeName} (${bt.code}) — 评级: ${bt.grade}</h3>
-                    <div style="font-size:12px;color:#888;margin-bottom:10px">数据: ${bt.dataRange || '-'} | 引擎: ${bt.engine || '-'} | 做多交易 ${long.total} 笔 | 平均持仓 ${long.avgHoldDays || 0} 天</div>
-                    ${long.total > 0 ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+                    <div style="font-size:12px;color:#888;margin-bottom:10px">数据: ${bt.dataRange || '-'} | 引擎: ${bt.engine || '-'} | 做多交易 ${long.total} 笔 | 平均持仓 ${long.avgHoldDays || 0} 天 | 收益口径: ${costNote}</div>
+                    ${long.total > 0 ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
                         <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
                             <div style="font-size:11px;color:#888">做多胜率</div>
                             <div style="font-size:18px;font-weight:bold;color:${winRateColor}">${long.winRate}%</div>
                             <div style="font-size:11px;color:#888">${long.wins||0}胜 / ${long.losses||0}负</div>
                         </div>
                         <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
-                            <div style="font-size:11px;color:#888">单笔均收益</div>
+                            <div style="font-size:11px;color:#888">单笔均净收益</div>
                             <div style="font-size:18px;font-weight:bold;color:${avgReturnColor}">${long.avgReturn}%</div>
-                            <div style="font-size:11px;color:#888">累计 ${long.totalReturn}%</div>
+                            <div style="font-size:11px;color:#888">毛 ${long.grossAvgReturn != null ? long.grossAvgReturn : '-'}%</div>
                         </div>
                         <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
                             <div style="font-size:11px;color:#888">盈亏比</div>
                             <div style="font-size:18px;font-weight:bold;color:#fff">${long.avgWin || 0} : ${Math.abs(long.avgLoss || 0)}</div>
                             <div style="font-size:11px;color:#888">均盈 : 均亏</div>
+                        </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+                        <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
+                            <div style="font-size:11px;color:#888">复利累计收益</div>
+                            <div style="font-size:18px;font-weight:bold;color:${compoundColor}">${long.compoundReturn != null ? long.compoundReturn : '-'}%</div>
+                            <div style="font-size:11px;color:#888">满仓滚动</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
+                            <div style="font-size:11px;color:#888">最大回撤</div>
+                            <div style="font-size:18px;font-weight:bold;color:${ddColor}">${long.maxDrawdown != null ? long.maxDrawdown : '-'}%</div>
+                            <div style="font-size:11px;color:#888">净值峰值→谷底</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:#141e28;border-radius:6px">
+                            <div style="font-size:11px;color:#888">盈利因子</div>
+                            <div style="font-size:18px;font-weight:bold;color:${pfColor}">${long.profitFactor != null ? long.profitFactor : '-'}</div>
+                            <div style="font-size:11px;color:#888">净盈 / 净亏</div>
                         </div>
                     </div>` : `<div style="padding:12px;text-align:center;color:#888;font-size:13px;background:#141e28;border-radius:6px;margin-bottom:12px">回测周期内无做多入场信号</div>`}
                     <button onclick="saveToShortcuts('${bt.code}','${safeName}','${long.winRate}','${bt.grade}')" style="padding:8px 16px;border:1px solid ${gradeColor};border-radius:6px;background:transparent;color:${gradeColor};cursor:pointer;font-size:13px">+ 加入快捷列表</button>
