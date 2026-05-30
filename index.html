@@ -238,6 +238,16 @@
         </div>
         <div class="shortcuts" id="customShortcuts"></div>
 
+        <div id="rankPanel" style="max-width:680px;margin:0 auto 24px;background:#141e28;border:1px solid #1f2d3a;border-radius:10px;padding:14px 16px">
+            <div style="font-size:13px;color:#b39dff;margin-bottom:8px;font-weight:bold">📊 排名股票池(可自定义,自动保存到本机)</div>
+            <textarea id="rankListInput" rows="2" placeholder="代码或名称,逗号/空格/换行分隔。例: 中钨高新, sz000510, 2330。留空则用默认清单" style="width:100%;padding:10px 12px;border:1px solid #2a3a4a;border-radius:8px;background:#1a2a3a;color:#fff;font-size:13px;outline:none;resize:vertical;font-family:inherit"></textarea>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+                <button onclick="doRank()" style="padding:8px 18px;border:none;border-radius:8px;background:#5a3dbf;color:#fff;font-size:13px;cursor:pointer">保存并排名</button>
+                <button onclick="resetRankList()" style="padding:8px 14px;border:1px solid #2a3a4a;border-radius:8px;background:transparent;color:#aaa;font-size:12px;cursor:pointer">恢复默认</button>
+                <span id="rankPoolHint" style="font-size:12px;color:#666"></span>
+            </div>
+        </div>
+
         <div class="loading" id="loading">
             <div class="spinner"></div>
             <p id="loadingText">正在获取数据并分析中...</p>
@@ -292,7 +302,7 @@
         }
 
         // 批量排名默认股票池:内置自选股 + 用户新增的 5 只(德明利已在列)
-        const RANK_LIST = [
+        const DEFAULT_RANK_LIST = [
             'sz002049','sh603893','sz300750','sz300274','sh603698','sh601138',
             'sh600011','sh601600','sz002138','sh603986','sz002716','sh603256',
             'sz001309','sh601899','sz000426','sz002428','sh600259','sh600362',
@@ -301,16 +311,49 @@
         ];
 
         const rankBtn = document.getElementById('rankBtn');
+        const rankListInput = document.getElementById('rankListInput');
+        const rankPoolHint = document.getElementById('rankPoolHint');
+
+        // 把输入框文本拆成代码/名称数组(逗号、空格、换行、中文逗号/顿号都当分隔符)
+        function parseRankInput(text) {
+            return (text || '').split(/[\s,，、;；]+/).map(s => s.trim()).filter(Boolean);
+        }
+
+        // 初始化:有自定义就回填,否则留空(走默认)
+        function loadRankList() {
+            const saved = localStorage.getItem('rankListCustom');
+            if (saved) rankListInput.value = parseRankInput(saved).join(', ');
+            updateRankHint();
+        }
+        function updateRankHint() {
+            const items = parseRankInput(rankListInput.value);
+            rankPoolHint.textContent = items.length
+                ? `当前股票池 ${items.length} 只(含回测,约需 ${Math.max(5, Math.round(items.length * 0.4))}-${items.length * 2} 秒)`
+                : `留空 → 用默认 ${DEFAULT_RANK_LIST.length} 只`;
+        }
+        function resetRankList() {
+            rankListInput.value = '';
+            localStorage.removeItem('rankListCustom');
+            updateRankHint();
+        }
+        rankListInput.addEventListener('input', updateRankHint);
+        loadRankList();
 
         async function doRank() {
+            const typed = parseRankInput(rankListInput.value);
+            const list = typed.length ? typed : DEFAULT_RANK_LIST;
+            // 自定义清单存本机(留空则清除,回到默认)
+            if (typed.length) localStorage.setItem('rankListCustom', typed.join(','));
+            else localStorage.removeItem('rankListCustom');
+
             btn.disabled = true;
             rankBtn.disabled = true;
             errorDiv.classList.remove('active');
             resultDiv.classList.remove('active');
             loading.classList.add('active');
-            loadingText.textContent = `正在批量评分 + 回测 ${RANK_LIST.length} 只股票(含历史回测,约需 10-30 秒)...`;
+            loadingText.textContent = `正在批量评分 + 回测 ${list.length} 只股票(含历史回测,约需 ${Math.max(5, Math.round(list.length * 0.4))}-${list.length * 2} 秒)...`;
             try {
-                const res = await fetch(`/api/rank?codes=${encodeURIComponent(RANK_LIST.join(','))}`);
+                const res = await fetch(`/api/rank?codes=${encodeURIComponent(list.join(','))}`);
                 const data = await res.json();
                 if (data.error) { showError(data.error); return; }
                 renderRank(data);
