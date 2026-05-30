@@ -598,6 +598,31 @@
                 <div class="score-labels"><span>强烈卖出</span><span>观望</span><span>强烈买入</span></div>
             </div>`;
 
+            // 三维综合(技术/估值/基本面)
+            if (data.composite != null) {
+                const dimColor = s => s == null ? '#666' : s >= 65 ? '#4caf50' : s >= 45 ? '#ff9800' : '#f44336';
+                const val = data.valuation || {}, fund = data.fundamental || {};
+                const dims = data.dims || {};
+                const dimBox = (title, score, label, hint) => `
+                    <div style="flex:1;min-width:120px;background:#141e28;border-radius:10px;padding:14px;text-align:center;border-top:3px solid ${dimColor(score)}">
+                        <div style="font-size:12px;color:#888;margin-bottom:4px">${title}</div>
+                        <div style="font-size:24px;font-weight:bold;color:${dimColor(score)}">${score != null ? score : '—'}</div>
+                        <div style="font-size:11px;color:#aaa">${label || (score == null ? '无数据' : '')}</div>
+                        <div style="font-size:10px;color:#666;margin-top:2px">${hint || ''}</div>
+                    </div>`;
+                html += `<div style="background:#1a2530;border:1px solid #2a3a4a;border-radius:12px;padding:18px;margin-bottom:20px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+                        <span style="font-size:15px;font-weight:bold;color:#b39dff">三维综合分 ${data.composite}<span style="font-size:12px;color:#888;font-weight:normal"> / 100(技术·估值·基本面 等权)</span></span>
+                        <span style="font-size:11px;color:#666">估值/基本面为当前值,不参与回测</span>
+                    </div>
+                    <div style="display:flex;gap:12px;flex-wrap:wrap">
+                        ${dimBox('技术面', dims.technical, '', '评分标准化·择时')}
+                        ${dimBox('估值', val.score, val.label, val.pePercentile != null ? `PE ${val.pePercentile}% 分位` : '')}
+                        ${dimBox('基本面', fund.score, fund.label, fund.roe != null ? `ROE ${fund.roe.toFixed(1)}%` : '')}
+                    </div>
+                </div>`;
+            }
+
             // 操作建议大卡片（最显眼）
             const posAdvice = (rr && rr.positionAdvice) || '';
             const holdAdvice = summary.totalScore >= 10 ? '建议持仓5-10天，趋势跟踪' : summary.totalScore >= 5 ? '建议持仓3-5天，短线波段' : summary.totalScore >= 1 ? '建议持仓1-3天，快进快出' : '不建议开仓';
@@ -716,9 +741,30 @@
                 </div>`;
             }
 
+            // 估值 / 基本面 明细(与技术指标并列的可折叠模块)
+            const extraSections = [
+                { title: '估值分析', d: data.valuation },
+                { title: '基本面', d: data.fundamental },
+            ];
+            for (const sec of extraSections) {
+                if (!sec.d || !sec.d.signals) continue;
+                const score = sec.d.score;
+                const scoreText = score == null ? '<span class="section-score zero">无数据</span>'
+                    : `<span class="section-score ${score >= 65 ? 'positive' : score >= 45 ? 'zero' : 'negative'}">${score}/100 ${sec.d.label || ''}</span>`;
+                html += `<div class="section">
+                    <div class="section-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                        <span class="section-title">${sec.title}</span>
+                        ${scoreText}
+                    </div>
+                    <div class="section-body">
+                        ${sec.d.signals.map(s => `<div class="signal-item">${s}</div>`).join('')}
+                    </div>
+                </div>`;
+            }
+
             // 免责声明
             html += `<div class="disclaimer">
-                免责声明：以上分析仅基于技术面指标，不构成投资建议。投资有风险，入市需谨慎。<br>
+                免责声明：以上分析基于技术面 + 估值 + 基本面，不含消息面，不构成投资建议。投资有风险，入市需谨慎。<br>
                 数据来源：新浪财经(实时) / 腾讯财经(历史K线) | 分析时间: ${rt.time}
             </div>`;
 

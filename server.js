@@ -354,6 +354,19 @@ const server = http.createServer(async (req, res) => {
 
       const marketEnv = await getMarketEnvironment();
       const analysis = computeScore(klines, { marketEnv, realtime: realtimeArr[0] });
+
+      // 估值 + 基本面(并行;失败降级为 null,不影响技术面输出)
+      const [val, fund] = await Promise.all([
+        fetchValuation(code).then(scoreValuation).catch(() => ({ score: null, signals: ['估值接口失败'] })),
+        fetchFundamentals(code).then(scoreFundamentals).catch(() => ({ score: null, signals: ['财务接口失败'] })),
+      ]);
+      analysis.valuation = val;
+      analysis.fundamental = fund;
+      const techDim = analysis.summary.normalizedScore;
+      const present = [techDim, val.score, fund.score].filter(s => s != null);
+      analysis.composite = present.length ? Math.round(present.reduce((x, y) => x + y, 0) / present.length) : techDim;
+      analysis.dims = { technical: techDim, valuation: val.score, fundamental: fund.score };
+
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(analysis));
     } catch (e) {
