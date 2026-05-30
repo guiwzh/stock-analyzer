@@ -100,6 +100,13 @@ async function rankStocks(inputs) {
 
   const marketEnv = await getMarketEnvironment();
 
+  // 大盘指数 K 线只拉一次,供所有标的的回测做大盘环境过滤(与实盘一致)
+  let indexKlines = null;
+  try {
+    indexKlines = await fetchHistory('sh000001', 500);
+    if (indexKlines.length < 30) indexKlines = null;
+  } catch (e) { /* 降级:无大盘过滤 */ }
+
   // A 股实时行情批量拿(一个请求多代码)
   const aShares = codes.filter(c => !c.startsWith('tw'));
   const rtMap = {};
@@ -114,17 +121,34 @@ async function rankStocks(inputs) {
     try {
       const isTW = code.startsWith('tw');
       let rt, klines;
+      // 拉 500 天:评分只看近端窗口,回测需要长历史,一次拉够两用
       if (isTW) {
-        const [rtArr, kl] = await Promise.all([fetchTWRealtime(code), fetchTWHistory(code, 120)]);
+        const [rtArr, kl] = await Promise.all([fetchTWRealtime(code), fetchTWHistory(code, 500)]);
         rt = rtArr[0]; klines = kl;
       } else {
         rt = rtMap[code];
-        klines = await fetchHistory(code, 120);
+        klines = await fetchHistory(code, 500);
         if (!rt) { const a = await fetchRealtime([code]); rt = a[0]; }
       }
       if (!rt) return { code, name: code, error: '无实时数据' };
       if (!klines || klines.length < 60) return { code, name: rt.name || code, error: `数据不足(${klines ? klines.length : 0}天)` };
       const a = computeScore(klines, { marketEnv, realtime: rt });
+
+      // 回测(数据足够时):用与单股一致的默认参数,拿净收益指标
+      let bt = null;
+      if (klines.length >= 80) {
+        const r = runBacktest(klines, { startIdx: 60, maxHoldDays: 30, indexKlines, trailing: false, useTP1: true });
+        if (r.long) {
+          bt = {
+            trades: r.long.total,
+            winRate: r.long.winRate,
+            compoundReturn: r.long.compoundReturn,
+            maxDrawdown: r.long.maxDrawdown,
+            profitFactor: r.long.profitFactor,
+          };
+        }
+      }
+
       return {
         code, name: rt.name || code,
         price: rt.price, changePct: rt.changePct,
@@ -134,6 +158,7 @@ async function rankStocks(inputs) {
         marketState: a.marketState,
         riskRewardRatio: a.riskReward.riskRewardRatio,
         positionAdvice: a.riskReward.positionAdvice,
+        backtest: bt,
       };
     } catch (e) {
       return { code, name: code, error: e.message };

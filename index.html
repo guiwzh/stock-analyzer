@@ -308,7 +308,7 @@
             errorDiv.classList.remove('active');
             resultDiv.classList.remove('active');
             loading.classList.add('active');
-            loadingText.textContent = `正在批量评分 ${RANK_LIST.length} 只股票...`;
+            loadingText.textContent = `正在批量评分 + 回测 ${RANK_LIST.length} 只股票(含历史回测,约需 10-30 秒)...`;
             try {
                 const res = await fetch(`/api/rank?codes=${encodeURIComponent(RANK_LIST.join(','))}`);
                 const data = await res.json();
@@ -343,28 +343,42 @@
                 </div>
             </div>`;
 
+            const ddColor = dd => dd == null ? '#666' : dd <= 10 ? '#4caf50' : dd <= 25 ? '#ff9800' : '#f44336';
+            const cmpColor = c => c == null ? '#666' : c > 0 ? '#4caf50' : '#f44336';
+            const wrColor = w => w == null ? '#666' : w >= 55 ? '#4caf50' : w >= 50 ? '#ff9800' : '#f44336';
+
             html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
                 <thead><tr style="color:#888;text-align:left;border-bottom:1px solid #2a3a4a">
-                    <th style="padding:10px 8px">#</th>
-                    <th style="padding:10px 8px">名称</th>
-                    <th style="padding:10px 8px;text-align:right">现价</th>
-                    <th style="padding:10px 8px;text-align:right">涨跌</th>
-                    <th style="padding:10px 8px;text-align:right">综合评分</th>
-                    <th style="padding:10px 8px">信号</th>
-                    <th style="padding:10px 8px;text-align:right">风险收益比</th>
+                    <th style="padding:10px 6px">#</th>
+                    <th style="padding:10px 6px">名称</th>
+                    <th style="padding:10px 6px;text-align:right">现价</th>
+                    <th style="padding:10px 6px;text-align:right">涨跌</th>
+                    <th style="padding:10px 6px;text-align:right">综合评分</th>
+                    <th style="padding:10px 6px">信号</th>
+                    <th style="padding:10px 6px;text-align:right">风险收益比</th>
+                    <th style="padding:10px 6px;text-align:right" title="历史回测做多胜率(扣费后)">回测胜率</th>
+                    <th style="padding:10px 6px;text-align:right" title="满仓滚动复利净收益(扣费后)">复利收益</th>
+                    <th style="padding:10px 6px;text-align:right" title="复利净值最大回撤">最大回撤</th>
                 </tr></thead><tbody>`;
 
             ok.forEach((r, i) => {
                 const dir = r.changePct > 0 ? 'up' : r.changePct < 0 ? 'down' : 'flat';
                 const sc = signalColor(r.signal, r.totalScore);
+                const b = r.backtest;
+                const btCells = b
+                    ? `<td style="padding:10px 6px;text-align:right;color:${wrColor(b.winRate)}">${b.winRate}%</td>
+                       <td style="padding:10px 6px;text-align:right;font-weight:bold;color:${cmpColor(b.compoundReturn)}">${b.compoundReturn > 0 ? '+' : ''}${b.compoundReturn}%</td>
+                       <td style="padding:10px 6px;text-align:right;color:${ddColor(b.maxDrawdown)}">${b.maxDrawdown}%</td>`
+                    : `<td colspan="3" style="padding:10px 6px;text-align:center;color:#666;font-size:12px">无回测信号</td>`;
                 html += `<tr style="border-bottom:1px solid #1a2530;cursor:pointer" onclick="quickAnalyze('${r.code}')" title="点击查看完整分析">
-                    <td style="padding:10px 8px;color:${i < 3 ? '#ffd54f' : '#666'};font-weight:${i < 3 ? 'bold' : 'normal'}">${i + 1}</td>
-                    <td style="padding:10px 8px"><span style="color:#fff;font-weight:bold">${r.name}</span> <span style="color:#666;font-size:11px">${r.code}</span></td>
-                    <td style="padding:10px 8px;text-align:right;color:#ddd">${(r.price != null ? r.price.toFixed(2) : '-')}</td>
-                    <td style="padding:10px 8px;text-align:right" class="${dir}">${r.changePct > 0 ? '+' : ''}${r.changePct}%</td>
-                    <td style="padding:10px 8px;text-align:right;font-weight:bold;color:${sc}">${r.totalScore}</td>
-                    <td style="padding:10px 8px"><span style="padding:2px 8px;border-radius:10px;font-size:12px;background:${sc}22;color:${sc}">${r.signal}</span></td>
-                    <td style="padding:10px 8px;text-align:right;color:${rrColor(r.riskRewardRatio)}">1:${r.riskRewardRatio}</td>
+                    <td style="padding:10px 6px;color:${i < 3 ? '#ffd54f' : '#666'};font-weight:${i < 3 ? 'bold' : 'normal'}">${i + 1}</td>
+                    <td style="padding:10px 6px"><span style="color:#fff;font-weight:bold">${r.name}</span> <span style="color:#666;font-size:11px">${r.code}</span></td>
+                    <td style="padding:10px 6px;text-align:right;color:#ddd">${(r.price != null ? r.price.toFixed(2) : '-')}</td>
+                    <td style="padding:10px 6px;text-align:right" class="${dir}">${r.changePct > 0 ? '+' : ''}${r.changePct}%</td>
+                    <td style="padding:10px 6px;text-align:right;font-weight:bold;color:${sc}">${r.totalScore}</td>
+                    <td style="padding:10px 6px"><span style="padding:2px 8px;border-radius:10px;font-size:12px;background:${sc}22;color:${sc}">${r.signal}</span></td>
+                    <td style="padding:10px 6px;text-align:right;color:${rrColor(r.riskRewardRatio)}">1:${r.riskRewardRatio}</td>
+                    ${btCells}
                 </tr>`;
             });
             html += `</tbody></table></div>`;
