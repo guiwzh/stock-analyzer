@@ -370,7 +370,8 @@ function resolveCode(input) {
   return input;
 }
 
-const WATCH_LIST = ['sz002049', 'sh603893', 'sz300750', 'sh601138', 'sh600011', 'tw2330'];
+const WATCH_LIST = ['sz002049', 'sh603893', 'sz300750', 'sh601138', 'sh600011', 'tw2330',
+  'sz000510', 'sh601021', 'sz000657', 'sh600027', 'sh603659'];
 
 async function fetchAny(code, days) {
   return code.startsWith('tw') ? fetchTWHistory(code, days) : fetchHistory(code, days);
