@@ -84,6 +84,81 @@ async function resolveStockCode(input) {
   return results.length > 0 ? results[0].code : null;
 }
 
+// ==================== 批量评分排名 ====================
+
+/**
+ * 对一组股票跑同一套 computeScore,按综合评分排序。
+ * - 大盘环境只取一次,所有股票共享(与 CLI analyze.js 一致)
+ * - A 股实时行情用新浪批量接口一次拿全(支持多代码)
+ * - 历史 K 线分批并发拉取,控制并发避免被上游限流
+ * 返回结果只含评分摘要,不含完整指标明细。
+ */
+async function rankStocks(inputs) {
+  const resolved = await Promise.all(inputs.map(i => resolveStockCode(i).catch(() => null)));
+  // 去重 + 去空
+  const codes = [...new Set(resolved.filter(Boolean))];
+
+  const marketEnv = await getMarketEnvironment();
+
+  // A 股实时行情批量拿(一个请求多代码)
+  const aShares = codes.filter(c => !c.startsWith('tw'));
+  const rtMap = {};
+  if (aShares.length) {
+    try {
+      const arr = await fetchRealtime(aShares);
+      for (const r of arr) rtMap[r.code] = r;
+    } catch (e) { /* 批量实时失败时,各股单独降级处理 */ }
+  }
+
+  async function analyzeOne(code) {
+    try {
+      const isTW = code.startsWith('tw');
+      let rt, klines;
+      if (isTW) {
+        const [rtArr, kl] = await Promise.all([fetchTWRealtime(code), fetchTWHistory(code, 120)]);
+        rt = rtArr[0]; klines = kl;
+      } else {
+        rt = rtMap[code];
+        klines = await fetchHistory(code, 120);
+        if (!rt) { const a = await fetchRealtime([code]); rt = a[0]; }
+      }
+      if (!rt) return { code, name: code, error: '无实时数据' };
+      if (!klines || klines.length < 60) return { code, name: rt.name || code, error: `数据不足(${klines ? klines.length : 0}天)` };
+      const a = computeScore(klines, { marketEnv, realtime: rt });
+      return {
+        code, name: rt.name || code,
+        price: rt.price, changePct: rt.changePct,
+        totalScore: a.summary.totalScore,
+        normalizedScore: a.summary.normalizedScore,
+        signal: a.summary.signal,
+        marketState: a.marketState,
+        riskRewardRatio: a.riskReward.riskRewardRatio,
+        positionAdvice: a.riskReward.positionAdvice,
+      };
+    } catch (e) {
+      return { code, name: code, error: e.message };
+    }
+  }
+
+  // 限并发(每批 5 只)
+  const CONCURRENCY = 5;
+  const results = [];
+  for (let i = 0; i < codes.length; i += CONCURRENCY) {
+    const batch = codes.slice(i, i + CONCURRENCY);
+    results.push(...await Promise.all(batch.map(analyzeOne)));
+  }
+
+  // 排序:可分析的按评分降序,出错/数据不足的排末尾
+  results.sort((x, y) => {
+    if (x.error && y.error) return 0;
+    if (x.error) return 1;
+    if (y.error) return -1;
+    return y.totalScore - x.totalScore;
+  });
+
+  return { marketEnv, count: results.length, results };
+}
+
 // ==================== HTTP 服务 ====================
 
 const server = http.createServer(async (req, res) => {
@@ -181,6 +256,27 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // API: 批量评分排名 — 对一组股票跑同一套 computeScore,按综合评分从高到低排序
+  // 注意:这是工具的技术面评分排名,不是投资建议
+  if (url.pathname === '/api/rank') {
+    const raw = url.searchParams.get('codes');
+    if (!raw) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: '请提供股票代码列表(codes=逗号分隔)' }));
+      return;
+    }
+    try {
+      const inputs = raw.split(',').map(s => s.trim()).filter(Boolean);
+      const out = await rankStocks(inputs);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(out));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: `排名出错: ${e.message}` }));
+    }
+    return;
+  }
+
   // API: 分析股票
   if (url.pathname === '/api/analyze') {
     const input = url.searchParams.get('code');
@@ -270,4 +366,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { server, startServer, searchStock, resolveStockCode, main };
+module.exports = { server, startServer, searchStock, resolveStockCode, rankStocks, main };
