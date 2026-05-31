@@ -1,8 +1,8 @@
 {
   "name": "@kamuira/stock-analyzer",
-  "version": "1.2.6",
+  "version": "1.3.0",
   "preferGlobal": true,
-  "description": "A股/台股综合技术分析工具 - 支持实时分析、回测验证、买卖建议",
+  "description": "A股/台股综合分析工具 - 技术面+估值+基本面+消息面四维评分、批量排名、含成本回测、买卖建议",
   "main": "server.js",
   "bin": {
     "stock-analyze": "bin/analyze.js",
@@ -24,7 +24,10 @@
     "RSI",
     "KDJ",
     "ADX",
-    "backtest"
+    "backtest",
+    "valuation",
+    "fundamental-analysis",
+    "stock-ranking"
   ],
   "author": "guiwzh",
   "license": "MIT",
@@ -44,6 +47,10 @@
     "dev.js",
     "indicators.js",
     "scoring.js",
+    "valuation.js",
+    "fundamentals.js",
+    "news.js",
+    "http-util.js",
     "index.html",
     "README.md"
   ],
