@@ -20,6 +20,7 @@ const { computeScore } = require('./scoring');
 const { backtest: runBacktest } = require('./backtest');
 const { fetchValuation, scoreValuation } = require('./valuation');
 const { fetchFundamentals, scoreFundamentals } = require('./fundamentals');
+const { fetchNewsCached, scoreNews } = require('./news');
 
 const PORT = 3000;
 const HOST = '127.0.0.1';
@@ -136,10 +137,11 @@ async function rankStocks(inputs) {
       if (!klines || klines.length < 60) return { code, name: rt.name || code, error: `数据不足(${klines ? klines.length : 0}天)` };
       const a = computeScore(klines, { marketEnv, realtime: rt });
 
-      // 估值 + 基本面(并行;失败不影响其余维度,降级为 null)
-      const [val, fund] = await Promise.all([
+      // 估值 + 基本面 + 消息面(并行;失败不影响其余维度,降级为 null)
+      const [val, fund, news] = await Promise.all([
         fetchValuation(code).then(scoreValuation).catch(() => ({ score: null, signals: ['估值接口失败'] })),
         fetchFundamentals(code).then(scoreFundamentals).catch(() => ({ score: null, signals: ['财务接口失败'] })),
+        fetchNewsCached(code).then(scoreNews).catch(() => ({ score: null, signals: ['消息接口失败'] })),
       ]);
 
       // 回测(数据足够时):用与单股一致的默认参数,拿净收益指标
@@ -157,10 +159,10 @@ async function rankStocks(inputs) {
         }
       }
 
-      // ===== 三维综合分(均衡型:技术/估值/基本面 等权,缺失维度按现有维度平均) =====
+      // ===== 综合分(均衡型:技术/估值/基本面/消息面 等权,缺失维度按现有维度平均) =====
       const techDim = a.summary.normalizedScore; // 0~100
-      const dims = { technical: techDim, valuation: val.score, fundamental: fund.score };
-      const present = [techDim, val.score, fund.score].filter(s => s != null);
+      const dims = { technical: techDim, valuation: val.score, fundamental: fund.score, news: news.score };
+      const present = [techDim, val.score, fund.score, news.score].filter(s => s != null);
       const composite = present.length ? Math.round(present.reduce((x, y) => x + y, 0) / present.length) : techDim;
 
       return {
@@ -177,6 +179,7 @@ async function rankStocks(inputs) {
         dims,
         valuation: { score: val.score, label: val.label || null, peTTM: val.peTTM != null ? +val.peTTM.toFixed(1) : null, pePercentile: val.pePercentile, board: val.board || null, signals: val.signals },
         fundamental: { score: fund.score, label: fund.label || null, roe: fund.roe, revenueYoY: fund.revenueYoY, profitYoY: fund.profitYoY, reportDate: fund.reportDate, signals: fund.signals },
+        news: { score: news.score, label: news.label || null, hitCount: news.hitCount || 0, signals: news.signals },
       };
     } catch (e) {
       return { code, name: code, error: e.message };
@@ -355,17 +358,19 @@ const server = http.createServer(async (req, res) => {
       const marketEnv = await getMarketEnvironment();
       const analysis = computeScore(klines, { marketEnv, realtime: realtimeArr[0] });
 
-      // 估值 + 基本面(并行;失败降级为 null,不影响技术面输出)
-      const [val, fund] = await Promise.all([
+      // 估值 + 基本面 + 消息面(并行;失败降级为 null,不影响技术面输出)
+      const [val, fund, news] = await Promise.all([
         fetchValuation(code).then(scoreValuation).catch(() => ({ score: null, signals: ['估值接口失败'] })),
         fetchFundamentals(code).then(scoreFundamentals).catch(() => ({ score: null, signals: ['财务接口失败'] })),
+        fetchNewsCached(code).then(scoreNews).catch(() => ({ score: null, signals: ['消息接口失败'] })),
       ]);
       analysis.valuation = val;
       analysis.fundamental = fund;
+      analysis.news = news;
       const techDim = analysis.summary.normalizedScore;
-      const present = [techDim, val.score, fund.score].filter(s => s != null);
+      const present = [techDim, val.score, fund.score, news.score].filter(s => s != null);
       analysis.composite = present.length ? Math.round(present.reduce((x, y) => x + y, 0) / present.length) : techDim;
-      analysis.dims = { technical: techDim, valuation: val.score, fundamental: fund.score };
+      analysis.dims = { technical: techDim, valuation: val.score, fundamental: fund.score, news: news.score };
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(analysis));

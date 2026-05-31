@@ -384,13 +384,13 @@
             const rrColor = rr => rr >= 2 ? '#4caf50' : rr >= 1 ? '#ff9800' : '#f44336';
 
             let html = `<div style="background:#1a2530;border:1px solid #2a3a4a;border-radius:10px;padding:18px 20px;margin-bottom:18px">
-                <div style="font-size:17px;font-weight:bold;color:#b39dff;margin-bottom:6px">三维综合排名（均衡型）</div>
+                <div style="font-size:17px;font-weight:bold;color:#b39dff;margin-bottom:6px">四维综合排名（均衡型）</div>
                 <div style="font-size:12px;color:#888;line-height:1.7">
-                    综合分 = <b style="color:#aaa">技术面 / 估值 / 基本面</b> 三维等权平均（各 0~100，越高越好），按综合分从高到低排序，共 ${ok.length} 只有效${bad.length ? `（${bad.length} 只数据不足/失败）` : ''}。
+                    综合分 = <b style="color:#aaa">技术面 / 估值 / 基本面 / 消息面</b> 四维等权平均（各 0~100，越高越好），按综合分从高到低排序，共 ${ok.length} 只有效${bad.length ? `（${bad.length} 只数据不足/失败）` : ''}。
                     大盘环境：${(marketEnv && marketEnv.signals ? marketEnv.signals.join(' | ') : '-')}<br>
-                    · <b style="color:#aaa">技术面</b>=评分标准化(择时) · <b style="color:#aaa">估值</b>=PE/PB历史分位(越便宜越高) · <b style="color:#aaa">基本面</b>=ROE/增速/负债(越优质越高)<br>
+                    · <b style="color:#aaa">技术</b>=评分标准化(择时) · <b style="color:#aaa">估值</b>=PE/PB历史分位 · <b style="color:#aaa">基本面</b>=ROE/增速/负债 · <b style="color:#aaa">消息</b>=公告关键词(利好+/利空−)<br>
                     <span style="color:#ffd54f">⭐ = 回测攻守兼备（盈利因子≥1.5 且 最大回撤≤25% 且 复利&gt;0），本次 ${starCount} 只，已高亮。</span><br>
-                    <span style="color:#ff8a80">估值/基本面为当前值、不参与回测；综合分高仅代表"现在更值得细看"，不含消息面，也不保证未来 ≠ 推荐买入。请自行判断。</span>
+                    <span style="color:#ff8a80">估值/基本面/消息面均为当前值、不参与回测；消息面是公告关键词初筛(较粗)；综合分高仅代表"现在更值得细看"，不保证未来 ≠ 推荐买入。请自行判断。</span>
                 </div>
             </div>`;
 
@@ -402,16 +402,17 @@
 
             // ✅ 买入候选:同时满足全部硬性条件,再按综合分取前三
             const isBuyCandidate = r => {
-                const f = r.fundamental || {}, v = r.valuation || {};
+                const f = r.fundamental || {}, v = r.valuation || {}, nw = r.news || {};
                 return r.composite >= 55
                     && f.score != null && f.score >= 45   // 基本面不偏弱
                     && v.score != null && v.score >= 40   // 估值不高估
+                    && (nw.score == null || nw.score >= 40) // 消息面无明显利空
                     && r.totalScore >= 1                  // 当前技术面=买入侧(谨慎买入及以上)
                     && isQualified(r.backtest);           // 回测攻守兼备 ⭐
             };
             const candidates = ok.filter(isBuyCandidate).slice(0, 3);
             const medals = ['🥇', '🥈', '🥉'];
-            const condLine = '条件:综合≥55 · 基本面≥45(不弱) · 估值≥40(不高估) · 当前技术=买入侧 · 回测⭐(攻守兼备)';
+            const condLine = '条件:综合≥55 · 基本面≥45 · 估值≥40 · 消息面无明显利空 · 当前技术=买入侧 · 回测⭐';
             html += `<div style="margin-bottom:22px">
                 <div style="font-size:14px;font-weight:bold;color:#4caf50;margin-bottom:4px">✅ 买入候选(同时满足全部条件,按综合分取前三)</div>
                 <div style="font-size:11px;color:#777;margin-bottom:10px">${condLine}</div>`;
@@ -434,6 +435,7 @@
                         ${bar('技术', dims.technical)}
                         ${bar('估值' + (v.label ? '(' + v.label + ')' : ''), v.score)}
                         ${bar('基本面' + (f.label ? '(' + f.label + ')' : ''), f.score)}
+                        ${bar('消息' + ((r.news && r.news.label) ? '(' + r.news.label + ')' : ''), r.news ? r.news.score : null)}
                         <div style="margin-top:8px;text-align:center"><span style="padding:2px 10px;border-radius:10px;font-size:12px;background:${sc}22;color:${sc}">${r.signal}</span>${r.backtest ? `<span style="margin-left:6px;font-size:11px;color:${cmpColor(r.backtest.compoundReturn)}">回测${r.backtest.compoundReturn > 0 ? '+' : ''}${r.backtest.compoundReturn}%</span>` : ''}</div>
                     </div>`;
                 });
@@ -452,6 +454,7 @@
                     <th style="padding:10px 6px;text-align:center" title="技术面评分标准化(择时)">技术</th>
                     <th style="padding:10px 6px;text-align:center" title="PE/PB 历史分位,越便宜越高">估值</th>
                     <th style="padding:10px 6px;text-align:center" title="ROE/营收利润增速/负债,越优质越高">基本面</th>
+                    <th style="padding:10px 6px;text-align:center" title="公告关键词:利好+/利空−,50为中性">消息</th>
                     <th style="padding:10px 6px">技术信号</th>
                     <th style="padding:10px 6px;text-align:right" title="回测满仓复利净收益(扣费)">复利回测</th>
                 </tr></thead><tbody>`;
@@ -477,6 +480,7 @@
                     ${dimCell(r.dims ? r.dims.technical : null, '', '')}
                     ${dimCell(v.score, v.label, vSub)}
                     ${dimCell(f.score, f.label, fSub)}
+                    ${dimCell(r.news ? r.news.score : null, r.news ? r.news.label : null, r.news && r.news.hitCount ? r.news.hitCount + '条' : '')}
                     <td style="padding:8px 6px"><span style="padding:2px 8px;border-radius:10px;font-size:12px;background:${sc}22;color:${sc}">${r.signal}</span></td>
                     ${btCell}
                 </tr>`;
@@ -661,6 +665,7 @@
                         ${dimBox('技术面', dims.technical, '', '评分标准化·择时')}
                         ${dimBox('估值', val.score, val.label, val.pePercentile != null ? `PE ${val.pePercentile}% 分位` : '')}
                         ${dimBox('基本面', fund.score, fund.label, fund.roe != null ? `ROE ${fund.roe.toFixed(1)}%` : '')}
+                        ${dimBox('消息面', (data.news || {}).score, (data.news || {}).label, (data.news && data.news.hitCount) ? `命中 ${data.news.hitCount} 条` : '公告关键词')}
                     </div>
                 </div>`;
             }
@@ -787,6 +792,7 @@
             const extraSections = [
                 { title: '估值分析', d: data.valuation },
                 { title: '基本面', d: data.fundamental },
+                { title: '消息面(公告关键词)', d: data.news },
             ];
             for (const sec of extraSections) {
                 if (!sec.d || !sec.d.signals) continue;
