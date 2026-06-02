@@ -340,6 +340,17 @@
         rankListInput.addEventListener('input', updateRankHint);
         loadRankList();
 
+        // 保存上一次排名的渲染结果(仅前端内存,非接口缓存),用于点进个股后快速返回
+        let lastRankHTML = '';
+
+        function backToRank() {
+            if (!lastRankHTML) return;
+            errorDiv.classList.remove('active');
+            resultDiv.innerHTML = lastRankHTML;
+            resultDiv.classList.add('active');
+            window.scrollTo(0, 0);
+        }
+
         async function doRank() {
             const extra = parseRankInput(rankListInput.value);
             // 默认清单始终包含;额外的拼在后面(服务端按解析后的代码去重)
@@ -498,6 +509,7 @@
                 点击任意一行可查看该股完整分析与回测。
             </div>`;
 
+            lastRankHTML = html; // 存起来,点进个股后可一键返回,无需重算
             resultDiv.innerHTML = html;
             resultDiv.classList.add('active');
         }
@@ -554,6 +566,11 @@
             const direction = rt.change > 0 ? 'up' : rt.change < 0 ? 'down' : 'flat';
 
             let html = '';
+
+            // 若是从排名点进来的,显示一键返回(直接复用已渲染结果,不重新计算)
+            if (lastRankHTML) {
+                html += `<button onclick="backToRank()" style="margin-bottom:14px;padding:8px 16px;border:1px solid #5a3dbf;border-radius:8px;background:transparent;color:#b39dff;font-size:13px;cursor:pointer">← 返回排名</button>`;
+            }
 
             // 回测结果卡片
             if (backtestData && !backtestData.error) {
