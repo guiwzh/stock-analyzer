@@ -9,12 +9,107 @@
 
 const http = require('http');
 const https = require('https');
+const tls = require('tls');
+const { execFile } = require('child_process');
 const { SMA } = require('./indicators');
 const { computeScore } = require('./scoring');
 
 // 外部行情接口的单次请求超时(毫秒)。上游(新浪/腾讯/Yahoo)任一卡住时,
 // 不加超时会让 Promise 永久挂起,前端一直转圈。
 const REQUEST_TIMEOUT = 8000;
+
+/**
+ * 走代理的 https GET(用于台股 Yahoo/TWSE 这类境外源)。
+ *
+ * 背景:国内 IP 直连 Yahoo finance 接口会被地区屏蔽(返回 403 的 <html lang="zh">),
+ * 而 Node 的 https.get 默认 *不读* HTTPS_PROXY 环境变量,所以即便用户开了
+ * 代理(Clash 等)台股也拿不到数据。这里在检测到 https_proxy/HTTPS_PROXY 时,
+ * 用 HTTP CONNECT 建隧道再做 TLS,纯 Node、无依赖;未设代理则退化为普通直连。
+ *
+ * @returns {import('http').ClientRequest} 与 https.get 一致,可被 withTimeout 包裹
+ */
+function proxiedGet(reqOptions, cb) {
+  const proxy = process.env.https_proxy || process.env.HTTPS_PROXY
+    || process.env.all_proxy || process.env.ALL_PROXY;
+  if (!proxy) return https.get(reqOptions, cb);
+
+  const pu = new URL(proxy);
+  const host = reqOptions.hostname || reqOptions.host;
+  const port = reqOptions.port || 443;
+  const auth = pu.username
+    ? { 'Proxy-Authorization': 'Basic ' + Buffer.from(
+        decodeURIComponent(pu.username) + ':' + decodeURIComponent(pu.password)).toString('base64') }
+    : {};
+
+  const opts = Object.assign({}, reqOptions, {
+    agent: false,
+    createConnection(_o, done) {
+      const c = http.request({
+        host: pu.hostname, port: pu.port || 80, method: 'CONNECT',
+        path: `${host}:${port}`, headers: auth,
+      });
+      c.on('connect', (res, socket) => {
+        if (res.statusCode !== 200) { done(new Error(`代理 CONNECT 失败: ${res.statusCode}`)); return; }
+        const tlsSock = tls.connect({ socket, servername: host }, () => done(null, tlsSock));
+        tlsSock.on('error', done);
+      });
+      c.on('error', done);
+      c.setTimeout(REQUEST_TIMEOUT, () => c.destroy(new Error('代理连接超时')));
+      c.end();
+    },
+  });
+  return https.get(opts, cb);
+}
+
+/** proxiedGet 的 Promise 版,拿整段响应文本(供台股源的回退路径用) */
+function proxiedText(url) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    withTimeout(proxiedGet({
+      hostname: u.hostname, path: u.pathname + u.search,
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: '*/*' },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    }), reject);
+  });
+}
+
+/**
+ * 用系统 curl 取文本。台股的 Yahoo / TWSE 会按 TLS 指纹(JA3)歧视 Node 的握手
+ * (Node 直连/隧道都被 403 或挂起),而 curl 的指纹能通过;curl 还会自动读取
+ * https_proxy 环境变量,正好解决国内访问境外源需走代理的问题。
+ * curl 不存在时(罕见)抛 ENOENT,由 twFetch 回退到 Node 路径。
+ */
+function curlText(url) {
+  return new Promise((resolve, reject) => {
+    // 经代理访问境外源首连常慢/偶发 SSL 重置(exit 35),故给足超时并自动重试。
+    execFile('curl', ['-s', '--compressed', '--connect-timeout', '8', '--max-time', '20',
+      '--retry', '3', '--retry-delay', '1', '--retry-all-errors',
+      '-A', 'Mozilla/5.0', '-H', 'Accept: */*', url],
+      { maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
+        if (err) { reject(err); return; }
+        if (!stdout) { reject(new Error('curl 返回空响应')); return; }
+        resolve(stdout);
+      });
+  });
+}
+
+/** 台股取数:优先 curl(过指纹+走代理),无 curl 时回退 Node 代理隧道 */
+async function twFetch(url) {
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 600));
+    try {
+      return await curlText(url);
+    } catch (e) {
+      if (e && e.code === 'ENOENT') return proxiedText(url); // 环境无 curl,回退 Node 隧道
+      lastErr = e; // 多为经代理首连的偶发 SSL 重置,稍后重试
+    }
+  }
+  throw lastErr;
+}
 
 /**
  * 给一个 http(s) 请求挂上超时和错误处理。
@@ -144,82 +239,56 @@ function collect(res, code, resolve, reject) {
 
 // ==================== 台股数据 ====================
 
-function fetchTWRealtime(code) {
-  return new Promise((resolve, reject) => {
-    const num = code.replace(/^tw/i, '');
-    const exCh = `tse_${num}.tw|otc_${num}.tw`;
-    const url = `/stock/api/getStockInfo.jsp?ex_ch=${exCh}&_=${Date.now()}`;
-    withTimeout(https.get({ hostname: 'mis.twse.com.tw', path: url, headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-          if (!json.msgArray || json.msgArray.length === 0) { resolve([]); return; }
-          const results = [];
-          for (const item of json.msgArray) {
-            if (!item.z || item.z === '-') continue;
-            const price = parseFloat(item.z);
-            const yesterdayClose = parseFloat(item.y);
-            results.push({
-              code: `tw${item.c}`, name: item.n, price,
-              open: parseFloat(item.o) || price, high: parseFloat(item.h) || price,
-              low: parseFloat(item.l) || price, yesterdayClose,
-              change: +(price - yesterdayClose).toFixed(2),
-              changePct: yesterdayClose > 0 ? +(((price - yesterdayClose) / yesterdayClose) * 100).toFixed(2) : 0,
-              volume: Math.round(parseInt(item.v) || 0), amount: 0,
-              time: `${item.d} ${item.t || ''}`,
-            });
-          }
-          resolve(results);
-        } catch (e) { reject(e); }
-      });
-    }), reject);
-  });
+async function fetchTWRealtime(code) {
+  const num = code.replace(/^tw/i, '');
+  const exCh = `tse_${num}.tw|otc_${num}.tw`;
+  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&_=${Date.now()}`;
+  const json = JSON.parse(await twFetch(url));
+  if (!json.msgArray || json.msgArray.length === 0) return [];
+  const results = [];
+  for (const item of json.msgArray) {
+    if (!item.z || item.z === '-') continue;
+    const price = parseFloat(item.z);
+    const yesterdayClose = parseFloat(item.y);
+    results.push({
+      code: `tw${item.c}`, name: item.n, price,
+      open: parseFloat(item.o) || price, high: parseFloat(item.h) || price,
+      low: parseFloat(item.l) || price, yesterdayClose,
+      change: +(price - yesterdayClose).toFixed(2),
+      changePct: yesterdayClose > 0 ? +(((price - yesterdayClose) / yesterdayClose) * 100).toFixed(2) : 0,
+      volume: Math.round(parseInt(item.v) || 0), amount: 0,
+      time: `${item.d} ${item.t || ''}`,
+    });
+  }
+  return results;
 }
 
-function fetchTWHistory(code, days = 120) {
-  return new Promise((resolve, reject) => {
-    const num = code.replace(/^tw/i, '');
-    const symbol = `${num}.TW`;
-    const period2 = Math.floor(Date.now() / 1000);
-    const period1 = period2 - Math.floor(days * 24 * 60 * 60 * 1.5);
-    const url = `/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
-    withTimeout(https.get({ hostname: 'query1.finance.yahoo.com', path: url, headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        withTimeout(https.get(res.headers.location, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res2) => {
-          collectTWHist(res2, resolve, reject);
-        }), reject);
-        return;
-      }
-      collectTWHist(res, resolve, reject);
-    }), reject);
-  });
+async function fetchTWHistory(code, days = 120) {
+  const num = code.replace(/^tw/i, '');
+  const symbol = `${num}.TW`;
+  const period2 = Math.floor(Date.now() / 1000);
+  const period1 = period2 - Math.floor(days * 24 * 60 * 60 * 1.5);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
+  return parseTWHist(await twFetch(url));
 }
 
-function collectTWHist(res, resolve, reject) {
-  const chunks = [];
-  res.on('data', c => chunks.push(c));
-  res.on('end', () => {
-    try {
-      const json = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-      const result = json.chart && json.chart.result && json.chart.result[0];
-      if (!result || !result.timestamp) { resolve([]); return; }
-      const ts = result.timestamp, q = result.indicators.quote[0];
-      const klines = [];
-      for (let i = 0; i < ts.length; i++) {
-        if (q.close[i] === null) continue;
-        const d = new Date(ts[i] * 1000);
-        klines.push({
-          date: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
-          open: +(q.open[i]||0).toFixed(2), close: +(q.close[i]||0).toFixed(2),
-          high: +(q.high[i]||0).toFixed(2), low: +(q.low[i]||0).toFixed(2),
-          volume: Math.round((q.volume[i]||0)/1000),
-        });
-      }
-      resolve(klines);
-    } catch (e) { reject(e); }
-  });
+function parseTWHist(body) {
+  const json = JSON.parse(body);
+  const result = json.chart && json.chart.result && json.chart.result[0];
+  if (!result || !result.timestamp) return [];
+  const ts = result.timestamp, q = result.indicators.quote[0];
+  const klines = [];
+  for (let i = 0; i < ts.length; i++) {
+    if (q.close[i] === null) continue;
+    const d = new Date(ts[i] * 1000);
+    klines.push({
+      date: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
+      open: +(q.open[i]||0).toFixed(2), close: +(q.close[i]||0).toFixed(2),
+      high: +(q.high[i]||0).toFixed(2), low: +(q.low[i]||0).toFixed(2),
+      volume: Math.round((q.volume[i]||0)/1000),
+    });
+  }
+  return klines;
 }
 
 // ==================== 大盘环境 ====================
