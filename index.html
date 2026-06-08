@@ -249,6 +249,47 @@
             <button onclick="quickAnalyze('sz002340')">格林美</button>
             <button onclick="quickAnalyze('sh600900')">长江电力</button>
             <button onclick="quickAnalyze('sz002916')">深南电路</button>
+            <button onclick="quickAnalyze('sz002378')">章源钨业</button>
+            <button onclick="quickAnalyze('sh600699')">均胜电子</button>
+            <button onclick="quickAnalyze('sz002709')">天赐材料</button>
+            <button onclick="quickAnalyze('sz000338')">潍柴动力</button>
+            <button onclick="quickAnalyze('sz002125')">湘潭电化</button>
+            <button onclick="quickAnalyze('sh600089')">特变电工</button>
+            <button onclick="quickAnalyze('sh603124')">江南新材</button>
+            <button onclick="quickAnalyze('sz000983')">山西焦煤</button>
+            <button onclick="quickAnalyze('sz001314')">亿道信息</button>
+            <button onclick="quickAnalyze('sh600158')">中体产业</button>
+            <button onclick="quickAnalyze('sz000534')">万泽股份</button>
+            <button onclick="quickAnalyze('sz002747')">埃斯顿</button>
+            <button onclick="quickAnalyze('sz002050')">三花智控</button>
+            <button onclick="quickAnalyze('sz002167')">东方锆业</button>
+            <button onclick="quickAnalyze('sz002931')">锋龙股份</button>
+            <button onclick="quickAnalyze('sh600458')">时代新材</button>
+            <button onclick="quickAnalyze('sh603500')">祥和实业</button>
+            <button onclick="quickAnalyze('sz000021')">深科技</button>
+            <button onclick="quickAnalyze('sz002028')">思源电气</button>
+            <button onclick="quickAnalyze('sh600563')">法拉电子</button>
+            <button onclick="quickAnalyze('sz000725')">京东方A</button>
+            <button onclick="quickAnalyze('sh605358')">立昂微</button>
+            <button onclick="quickAnalyze('sz002938')">鹏鼎控股</button>
+            <button onclick="quickAnalyze('sh600522')">中天科技</button>
+            <button onclick="quickAnalyze('sz002213')">大为股份</button>
+            <button onclick="quickAnalyze('sh600226')">亨通股份</button>
+            <button onclick="quickAnalyze('sz001389')">广合科技</button>
+            <button onclick="quickAnalyze('sz002179')">中航光电</button>
+            <button onclick="quickAnalyze('sz002491')">通鼎互联</button>
+            <button onclick="quickAnalyze('sh601231')">环旭电子</button>
+            <button onclick="quickAnalyze('sz002156')">通富微电</button>
+            <button onclick="quickAnalyze('sz300476')">胜宏科技</button>
+            <button onclick="quickAnalyze('sh600406')">国电南瑞</button>
+            <button onclick="quickAnalyze('sz000807')">云铝股份</button>
+            <button onclick="quickAnalyze('sh600961')">株冶集团</button>
+            <button onclick="quickAnalyze('sh605117')">德业股份</button>
+            <button onclick="quickAnalyze('sh603271')">永杰新材</button>
+            <button onclick="quickAnalyze('sh603129')">春风动力</button>
+            <button onclick="quickAnalyze('sh603288')">海天味业</button>
+            <button onclick="quickAnalyze('sh603277')">银都股份</button>
+            <button onclick="quickAnalyze('sh603606')">东方电缆</button>
         </div>
         <div class="shortcuts" id="customShortcuts"></div>
 
@@ -323,7 +364,13 @@
             'sh600206','sh600111','sh601318','sh601066',
             'sz000510','sh601021','sz000657','sh600027','sh603659',
             'sh600309','sz300170','sh605589','sz300308','sz002463','sh603259','sz002371',
-            'sz300502','sh600487','sh601869','sh600869','sz002340','sh600900','sz002916'
+            'sz300502','sh600487','sh601869','sh600869','sz002340','sh600900','sz002916',
+            'sz002378','sh600699','sz002709','sz000338','sz002125','sh600089','sh603124',
+            'sz000983','sz001314','sh600158','sz000534','sz002747','sz002050','sz002167',
+            'sz002931','sh600458','sh603500','sz000021','sz002028','sh600563','sz000725',
+            'sh605358','sz002938','sh600522','sz002213','sh600226','sz001389','sz002179',
+            'sz002491','sh601231','sz002156','sz300476','sh600406','sz000807','sh600961',
+            'sh605117','sh603271','sh603129','sh603288','sh603277','sh603606'
         ];
 
         const rankBtn = document.getElementById('rankBtn');
@@ -358,6 +405,14 @@
 
         // 保存上一次排名的渲染结果(仅前端内存,非接口缓存),用于点进个股后快速返回
         let lastRankHTML = '';
+        let lastRankData = null;       // 上次排名的原始数据,用于本地重新筛选(不重算)
+        let rankFilterStrict = false;  // 是否只看"可博弈"(综合评分≥5 且 盈亏比>1)
+
+        function toggleRankFilter() {
+            if (!lastRankData) return;
+            rankFilterStrict = !rankFilterStrict;
+            renderRank(lastRankData);  // 用内存数据重渲染,零网络、零重算
+        }
 
         function backToRank() {
             if (!lastRankHTML) return;
@@ -385,6 +440,7 @@
                 const res = await fetch(`/api/rank?codes=${encodeURIComponent(list.join(','))}`);
                 const data = await res.json();
                 if (data.error) { showError(data.error); return; }
+                lastRankData = data;
                 renderRank(data);
             } catch (e) {
                 showError('网络请求失败: ' + e.message);
@@ -471,6 +527,16 @@
             }
             html += `<div style="font-size:11px;color:#ff8a80;margin-top:8px">注:这是按规则筛出的"候选",仍不含消息面;买前自行查公告、定仓位、设止损。</div></div>`;
 
+            // 🎯 可博弈筛选:技术综合评分≥5 且 盈亏比>1(用户自定义条件)
+            const passStrict = r => r.totalScore >= 5 && r.riskRewardRatio != null && r.riskRewardRatio > 1;
+            const strictCount = ok.filter(passStrict).length;
+            html += `<div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <button onclick="toggleRankFilter()" style="padding:8px 16px;border:1px solid ${rankFilterStrict ? '#4caf50' : '#5a3dbf'};border-radius:8px;background:${rankFilterStrict ? '#4caf5022' : 'transparent'};color:${rankFilterStrict ? '#4caf50' : '#b39dff'};font-size:13px;cursor:pointer">
+                    ${rankFilterStrict ? '✓ 已筛选:可博弈(评分≥5 且 盈亏比>1) · 点此显示全部' : '🎯 只看可博弈(技术评分≥5 且 盈亏比>1)'}
+                </button>
+                <span style="font-size:12px;color:#888">符合条件 <b style="color:${strictCount ? '#4caf50' : '#888'}">${strictCount}</b> 只</span>
+            </div>`;
+
             html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
                 <thead><tr style="color:#888;text-align:left;border-bottom:1px solid #2a3a4a">
                     <th style="padding:10px 6px">#</th>
@@ -483,10 +549,14 @@
                     <th style="padding:10px 6px;text-align:center" title="ROE/营收利润增速/负债,越优质越高">基本面</th>
                     <th style="padding:10px 6px;text-align:center" title="公告关键词:利好+/利空−,50为中性">消息</th>
                     <th style="padding:10px 6px">技术信号</th>
+                    <th style="padding:10px 6px;text-align:center" title="风险收益比:止盈空间/止损空间,>1 才划算">盈亏比</th>
                     <th style="padding:10px 6px;text-align:right" title="回测满仓复利净收益(扣费)">复利回测</th>
                 </tr></thead><tbody>`;
 
+            let shown = 0;
             ok.forEach((r, i) => {
+                if (rankFilterStrict && !passStrict(r)) return; // 筛选模式:跳过不达标的,保留原排名号
+                shown++;
                 const dir = r.changePct > 0 ? 'up' : r.changePct < 0 ? 'down' : 'flat';
                 const sc = signalColor(r.signal, r.totalScore);
                 const b = r.backtest;
@@ -509,9 +579,13 @@
                     ${dimCell(f.score, f.label, fSub)}
                     ${dimCell(r.news ? r.news.score : null, r.news ? r.news.label : null, r.news && r.news.hitCount ? r.news.hitCount + '条' : '')}
                     <td style="padding:8px 6px"><span style="padding:2px 8px;border-radius:10px;font-size:12px;background:${sc}22;color:${sc}">${r.signal}</span></td>
+                    <td style="padding:8px 6px;text-align:center;font-weight:bold;color:${rrColor(r.riskRewardRatio)}" title="技术综合评分 ${r.totalScore}">${r.riskRewardRatio != null ? r.riskRewardRatio : '-'}</td>
                     ${btCell}
                 </tr>`;
             });
+            if (rankFilterStrict && shown === 0) {
+                html += `<tr><td colspan="12" style="padding:20px;text-align:center;color:#ff9800;font-size:13px">没有股票同时满足 技术综合评分≥5 且 盈亏比>1 —— 当前多数标的要么动能不足、要么上方空间不够,空仓等待更稳妥。</td></tr>`;
+            }
             html += `</tbody></table></div>`;
 
             if (bad.length) {
