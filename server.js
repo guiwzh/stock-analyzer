@@ -21,6 +21,8 @@ const { backtest: runBacktest } = require('./backtest');
 const { fetchValuation, scoreValuation } = require('./valuation');
 const { fetchFundamentals, scoreFundamentals } = require('./fundamentals');
 const { fetchNewsCached, scoreNews } = require('./news');
+const { detectLaunch } = require('./screener');
+const { fetchHotSectors, fetchBoardMembers } = require('./sectors');
 
 const PORT = 3000;
 const HOST = '127.0.0.1';
@@ -165,6 +167,9 @@ async function rankStocks(inputs) {
       const present = [techDim, val.score, fund.score, news.score].filter(s => s != null);
       const composite = present.length ? Math.round(present.reduce((x, y) => x + y, 0) / present.length) : techDim;
 
+      // 潜伏启动检测(复用已拉的K线,零额外请求)
+      const launch = detectLaunch(klines);
+
       return {
         code, name: rt.name || code,
         price: rt.price, changePct: rt.changePct,
@@ -177,6 +182,7 @@ async function rankStocks(inputs) {
         backtest: bt,
         composite,
         dims,
+        launch: { score: launch.score, isLaunching: launch.isLaunching, stage: launch.stage, volIgnite: launch.volIgnite, rangePct: launch.rangePct, signals: launch.signals },
         valuation: { score: val.score, label: val.label || null, peTTM: val.peTTM != null ? +val.peTTM.toFixed(1) : null, pePercentile: val.pePercentile, board: val.board || null, signals: val.signals },
         fundamental: { score: fund.score, label: fund.label || null, roe: fund.roe, revenueYoY: fund.revenueYoY, profitYoY: fund.profitYoY, reportDate: fund.reportDate, signals: fund.signals },
         news: { score: news.score, label: news.label || null, hitCount: news.hitCount || 0, signals: news.signals },
@@ -320,6 +326,39 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: `排名出错: ${e.message}` }));
+    }
+    return;
+  }
+
+  // API: 今日热门板块(行业+概念,领涨榜 + 资金潜伏榜)
+  if (url.pathname === '/api/sectors') {
+    try {
+      const data = await fetchHotSectors();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(data));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: `板块数据获取失败: ${e.message}` }));
+    }
+    return;
+  }
+
+  // API: 某板块成分股代码(供前端送入批量排名)
+  if (url.pathname === '/api/sector_members') {
+    const board = url.searchParams.get('board');
+    const limit = Math.min(parseInt(url.searchParams.get('limit')) || 30, 60);
+    if (!board) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: '请提供板块代码(board=BKxxxx)' }));
+      return;
+    }
+    try {
+      const members = await fetchBoardMembers(board, limit);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ board, count: members.length, members }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: `成分股获取失败: ${e.message}` }));
     }
     return;
   }

@@ -82,12 +82,16 @@ function proxiedText(url) {
  * https_proxy 环境变量,正好解决国内访问境外源需走代理的问题。
  * curl 不存在时(罕见)抛 ENOENT,由 twFetch 回退到 Node 路径。
  */
-function curlText(url) {
+function curlText(url, extraHeaders = [], opts = {}) {
   return new Promise((resolve, reject) => {
+    const headerArgs = [];
+    for (const h of extraHeaders) headerArgs.push('-H', h);
+    // noProxy: 境内源(如东财 push2)强制直连,避免被台股的境外代理误带偏
+    const proxyArgs = opts.noProxy ? ['--noproxy', '*'] : [];
     // 经代理访问境外源首连常慢/偶发 SSL 重置(exit 35),故给足超时并自动重试。
     execFile('curl', ['-s', '--compressed', '--connect-timeout', '8', '--max-time', '20',
       '--retry', '3', '--retry-delay', '1', '--retry-all-errors',
-      '-A', 'Mozilla/5.0', '-H', 'Accept: */*', url],
+      '-A', 'Mozilla/5.0', '-H', 'Accept: */*', ...headerArgs, ...proxyArgs, url],
       { maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
         if (err) { reject(err); return; }
         if (!stdout) { reject(new Error('curl 返回空响应')); return; }
@@ -445,4 +449,5 @@ if (require.main === module) {
 module.exports = {
   fetchRealtime, fetchHistory, fetchTWRealtime, fetchTWHistory,
   getMarketEnvironment, resolveCode, formatReport, WATCH_LIST, main,
+  curlText,
 };
