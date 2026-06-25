@@ -1,8 +1,9 @@
 /**
  * 消息面模块 — 数据来自东方财富公告接口(np-anotice-stock)
  *
- * 用关键词对最近的公告标题做利好/利空初筛(减持/问询=利空,预增/回购/中标=利好),
- * 按时间衰减加权,聚合成 0~100 分(50=中性)。利空权重高于利好(风险更重要)。
+ * 用「带上下文护栏的分类器」对最近公告标题做利好/利空判定,按时间衰减加权,
+ * 聚合成 0~100 分(50=中性)。利空权重高于利好(风险更重要)。
+ * 护栏修正了简单关键词法的典型误判:解除质押/募资监管协议/再融资审核问询 不再被误判为利空。
  *
  * 特点:
  *   - 关键词法,免费、快(每只 1 次 HTTP,可并发);带 20 分钟内存缓存
@@ -13,21 +14,51 @@
  */
 const { getJSON, toSecuCode } = require('./http-util');
 
-// 利好 / 利空关键词(命中即计分;中性/行政事项不匹配)
-const POSITIVE = ['预增', '预盈', '扭亏', '增持', '回购', '中标', '订单', '合同', '战略合作',
-  '收购', '获批', '分红', '派息', '业绩快报', '量产'];
-const NEGATIVE = ['减持', '问询函', '关注函', '立案', '处罚', '违规', '诉讼', '仲裁', '商誉减值',
-  '计提', '预减', '预亏', '亏损', '退市', '风险警示', '*ST', 'ST', '质押', '冻结', '终止',
-  '下修', '监管', '警示函', '更正', '延期'];
-
 /**
- * 上下文护栏:命中的关键词在某些语境下不算利好/利空,返回 true 表示应忽略。
- * 例:"回购"出现在股权激励/限制性股票/期权语境里,是行政事项而非真实回购利好。
+ * 公告标题分类器 —— 带上下文护栏,返回 { tag:'pos'|'neg', weight, reason } 或 null(中性/忽略)。
+ * weight 为相对强度(再乘以基础分与时间衰减)。
+ *
+ * 重点解决简单关键词法的三类误判:
+ *   1) "解除质押" 含"质押" 却被判利空 → 解押其实是风险解除,弱利好
+ *   2) "募集资金三方监管协议" 含"监管" 却被判利空 → 常规事项,忽略
+ *   3) "向特定对象发行…审核问询函回复" 含"问询函" 却被判利空 → 定增/再融资审核流程,中性偏正;
+ *      只有"交易异常波动问询/关注"才是真利空
+ * 同时区分 增持↔减持、扩产型定增↔普通融资。
  */
-function isFalsePositive(kw, title) {
-  if (kw === '回购' && /激励|限制性|期权/.test(title)) return true;
-  if (kw === '增持' && /激励|限制性|期权/.test(title)) return true;
-  return false;
+function classifyAnnouncement(title) {
+  const t = title;
+
+  // ===== 护栏:看似利空、实为中性/利好的语境(优先判定) =====
+  if (/解除质押|解押/.test(t)) return { tag: 'pos', weight: 0.4, reason: '解除质押(风险解除)' };
+  if (/募集资金.*(监管|专户|存放|三方)|三方监管协议|监管协议/.test(t)) return null; // 募资监管=常规,忽略
+  // 再融资/重组的审核问询、回复、募集说明书更新等 = 推进流程,中性偏正(非利空)
+  if (/(向特定对象发行|非公开发行|定向增发|定增|可转债|配股|发行股票|发行A股|资产重组|重大资产)/.test(t)
+      && /(问询|审核|回复|反馈|募集说明书|更新|受理|批复|注册|核准|申请文件|预案|问询函)/.test(t)) {
+    return { tag: 'pos', weight: 0.3, reason: '再融资/重组推进' };
+  }
+
+  // ===== 强利空:真实风险事件 =====
+  if (/(交易|股票|股价).*(异常波动|异动).*(问询|关注)|(异常波动|异动).*问询/.test(t)) return { tag: 'neg', weight: 1.2, reason: '交易异动问询' };
+  if (/立案|行政处罚|被处罚|涉嫌|稽查|警示函|监管措施|责令改正|纪律处分/.test(t)) return { tag: 'neg', weight: 1.4, reason: '监管处罚/立案' };
+  if (/退市|风险警示|\*ST|实施其他风险警示/.test(t)) return { tag: 'neg', weight: 1.5, reason: '退市/ST风险' };
+  if (/减持/.test(t) && !/增持/.test(t)) return { tag: 'neg', weight: 1.0, reason: '股东减持' };
+  if (/预减|预亏|由盈转亏|业绩.*(下滑|下降|亏损)|商誉减值|计提.*减值|资产减值/.test(t)) return { tag: 'neg', weight: 1.2, reason: '业绩下滑/减值' };
+  if (/诉讼|仲裁|被起诉/.test(t)) return { tag: 'neg', weight: 0.7, reason: '诉讼仲裁' };
+  if (/冻结|平仓|司法拍卖/.test(t)) return { tag: 'neg', weight: 0.8, reason: '股份冻结/平仓' };
+  if (/质押/.test(t)) return { tag: 'neg', weight: 0.4, reason: '股权质押' };          // 弱(解押已在护栏排除)
+  if (/下修|终止(?!上市辅导)|延期/.test(t)) return { tag: 'neg', weight: 0.4, reason: '下修/终止/延期' };
+
+  // ===== 利好 =====
+  if (/(定增|向特定对象发行|非公开发行|可转债|投资|拟投资|新建|开工|募投).*(项目|产能|扩产|生产线|基地|建设)/.test(t)) return { tag: 'pos', weight: 1.0, reason: '扩产/投资项目' };
+  if (/扩产|投产|达产|量产|产能.*释放|满产/.test(t)) return { tag: 'pos', weight: 1.0, reason: '产能释放' };
+  if (/预增|预盈|扭亏|业绩快报|净利.*增长|业绩.*大增/.test(t)) return { tag: 'pos', weight: 1.2, reason: '业绩预增' };
+  if (/增持/.test(t) && !/激励|限制性|期权/.test(t)) return { tag: 'pos', weight: 1.1, reason: '股东增持' };
+  if (/回购/.test(t) && !/激励|限制性|期权|注销.*回购/.test(t)) return { tag: 'pos', weight: 0.9, reason: '股份回购' };
+  if (/中标|中选|大额订单|重大合同|重大订单|签约|战略合作|框架协议/.test(t)) return { tag: 'pos', weight: 0.9, reason: '订单/合作' };
+  if (/收购|并购|获批|核准.*(项目|生产)|认证|入选|获得.*(资质|认定)|通过.*认证/.test(t)) return { tag: 'pos', weight: 0.7, reason: '收购/获批/认证' };
+  if (/分红|派息|利润分配/.test(t)) return { tag: 'pos', weight: 0.5, reason: '分红派息' };
+
+  return null; // 常规/中性事项
 }
 
 /** 'sz001309' → '001309';非 A 股返回 null */
@@ -87,10 +118,12 @@ function scoreNews(items) {
   for (const it of items) {
     const w = recencyWeight(daysAgo(it.date));
     if (w === 0) continue;
-    const neg = NEGATIVE.find(k => it.title.includes(k));
-    const pos = POSITIVE.find(k => it.title.includes(k) && !isFalsePositive(k, it.title));
-    if (neg) { score -= 12 * w; hits.push({ date: it.date, title: it.title, tag: '利空', kw: neg }); }
-    else if (pos) { score += 7 * w; hits.push({ date: it.date, title: it.title, tag: '利好', kw: pos }); }
+    const c = classifyAnnouncement(it.title);
+    if (!c) continue;
+    // 利空基础分(12)高于利好(7):风险比利好更重要;再乘以事件强度与时间衰减
+    const delta = (c.tag === 'neg' ? -12 : 7) * c.weight * w;
+    score += delta;
+    hits.push({ date: it.date, title: it.title, tag: c.tag === 'neg' ? '利空' : '利好', reason: c.reason });
   }
   score = Math.max(0, Math.min(100, Math.round(score)));
 
@@ -100,7 +133,7 @@ function scoreNews(items) {
   } else {
     // 利空优先展示
     hits.sort((a, b) => (a.tag === '利空' ? -1 : 1) - (b.tag === '利空' ? -1 : 1));
-    for (const h of hits.slice(0, 6)) signals.push(`[${h.tag}] ${h.date} ${h.title}`);
+    for (const h of hits.slice(0, 6)) signals.push(`[${h.tag}·${h.reason}] ${h.date} ${h.title}`);
   }
   const label = score >= 60 ? '偏多' : score >= 40 ? '中性' : '偏空';
   return { score, signals, label, hitCount: hits.length };

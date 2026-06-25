@@ -184,7 +184,7 @@ async function rankStocks(inputs) {
         dims,
         launch: { score: launch.score, isLaunching: launch.isLaunching, stage: launch.stage, volIgnite: launch.volIgnite, rangePct: launch.rangePct, signals: launch.signals },
         valuation: { score: val.score, label: val.label || null, peTTM: val.peTTM != null ? +val.peTTM.toFixed(1) : null, pePercentile: val.pePercentile, board: val.board || null, signals: val.signals },
-        fundamental: { score: fund.score, label: fund.label || null, roe: fund.roe, revenueYoY: fund.revenueYoY, profitYoY: fund.profitYoY, reportDate: fund.reportDate, signals: fund.signals },
+        fundamental: { score: fund.score, label: fund.label || null, roe: fund.roe, revenueYoY: fund.revenueYoY, profitYoY: fund.profitYoY, cashRatio: fund.cashRatio != null ? fund.cashRatio : null, reportDate: fund.reportDate, signals: fund.signals },
         news: { score: news.score, label: news.label || null, hitCount: news.hitCount || 0, signals: news.signals },
       };
     } catch (e) {

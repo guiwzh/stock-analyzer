@@ -1,8 +1,9 @@
 /**
  * 基本面模块 — 数据来自东方财富 F10 主要财务指标(RPT_F10_FINANCE_MAINFINADATA)
  *
- * 取最近一期报告:ROE、营收同比、扣非净利润同比、毛利率、资产负债率。
- * 打分思路:成长性(营收/利润增速) + 盈利质量(ROE/毛利) + 财务健康(负债率)。
+ * 取最近一期报告:ROE、营收同比、扣非净利润同比、毛利率、资产负债率、净现比(利润现金含量)。
+ * 打分思路:成长性(营收/利润增速) + 盈利质量(ROE/毛利/净现比) + 财务健康(负债率)。
+ * 净现比 = 每股经营现金流/每股收益,识别"高增长但赚的是应收、不赚现金"的风险。
  *
  * 注意:季度更新;为"当前值",不参与回测。
  */
@@ -13,7 +14,7 @@ async function fetchFundamentals(code) {
   if (!secu) return null; // 非 A 股
   const url = 'https://datacenter.eastmoney.com/securities/api/data/v1/get'
     + '?reportName=RPT_F10_FINANCE_MAINFINADATA'
-    + '&columns=SECUCODE,REPORT_DATE,ROEJQ,YYZSRGDHBZC,KCFJCXSYJLRTZ,XSMLL,ZCFZL'
+    + '&columns=SECUCODE,REPORT_DATE,ROEJQ,YYZSRGDHBZC,KCFJCXSYJLRTZ,XSMLL,ZCFZL,EPSJB,MGJYXJJE'
     + `&filter=(SECUCODE%3D%22${secu}%22)`
     + '&pageSize=1&sortColumns=REPORT_DATE&sortTypes=-1&source=HSF10&client=PC';
   const j = await getJSON(url, { Referer: 'https://emweb.securities.eastmoney.com/' });
@@ -27,6 +28,8 @@ async function fetchFundamentals(code) {
     profitYoY: r.KCFJCXSYJLRTZ,// 扣非净利润同比增长
     grossMargin: r.XSMLL,      // 销售毛利率
     debtRatio: r.ZCFZL,        // 资产负债率
+    eps: r.EPSJB,              // 基本每股收益
+    ocfps: r.MGJYXJJE,         // 每股经营现金流(用于算净现比/利润现金含量)
   };
 }
 
@@ -66,6 +69,18 @@ function scoreFundamentals(f) {
   }
 
   if (f.grossMargin != null) signals.push(`毛利率${f.grossMargin.toFixed(1)}%`);
+
+  // 利润现金含量(净现比 = 每股经营现金流 / 每股收益):识别"高增长但不赚现金/利润是应收"的风险
+  // 注:为当期值,单季(尤其Q1)有季节性,故权重适中、明确标注"当期"
+  let cashRatio = null;
+  if (f.eps != null && f.eps > 0 && f.ocfps != null) {
+    cashRatio = f.ocfps / f.eps;
+    if (f.ocfps < 0) { score -= 12; signals.push(`⚠️当期经营现金流为负(每股${f.ocfps.toFixed(2)}元),利润质量存疑`); }
+    else if (cashRatio >= 0.8) { score += 5; signals.push(`净现比${cashRatio.toFixed(2)}(利润现金含量高)`); }
+    else if (cashRatio >= 0.3) { signals.push(`净现比${cashRatio.toFixed(2)}(利润现金含量一般)`); }
+    else { score -= 8; signals.push(`⚠️净现比${cashRatio.toFixed(2)}(利润现金含量低,多为应收/利润质量存疑)`); }
+  }
+
   if (f.reportDate) signals.push(`报告期:${f.reportDate}`);
 
   score = Math.max(0, Math.min(100, Math.round(score)));
@@ -73,6 +88,7 @@ function scoreFundamentals(f) {
     score, signals,
     label: score >= 65 ? '优质' : score >= 45 ? '中等' : '偏弱',
     roe: f.roe, revenueYoY: f.revenueYoY, profitYoY: f.profitYoY, reportDate: f.reportDate,
+    cashRatio: cashRatio != null ? +cashRatio.toFixed(2) : null,
   };
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@kamuira/stock-analyzer",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "preferGlobal": true,
   "description": "A股/台股综合分析工具 - 技术面+估值+基本面+消息面四维评分、批量排名、含成本回测、买卖建议、行业板块划分、热门板块与潜伏启动筛选",
   "main": "server.js",
