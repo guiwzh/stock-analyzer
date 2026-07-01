@@ -24,7 +24,7 @@ const { fetchNewsCached, scoreNews } = require('./news');
 const { detectLaunch } = require('./screener');
 const { fetchHotSectors, fetchBoardMembers } = require('./sectors');
 
-const PORT = 3000;
+const PORT = 3000;        // 本地服务端口(被占用时会自动 +1)
 const HOST = '127.0.0.1';
 
 // 搜索接口的单次请求超时(毫秒),避免上游卡住时请求永久挂起
